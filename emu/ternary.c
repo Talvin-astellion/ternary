@@ -392,41 +392,68 @@ void      ternaryROL  ( trint32_t* op1, trint32_t* op2, trint32_t rotate, int tr
 //    return op1;
 //}
 
+static const uint8_t ternary_add_sum[7] = {0, 1, 3, 0, 1, 3, 0};
+static const int8_t ternary_add_carry[7] = {-1, -1, 0, 0, 0, 1, 1};
+
 trint32_t ternaryADD  ( trint32_t op1, trint32_t op2 )
 {
-    trint32_t op3;
-    while(op2)
+    trint32_t result=0;
+    int carry=0;
+    unsigned shift;
+
+    for(shift=0; shift<BITS_PER_TRINT32_T; shift+=BITS_PER_TRIT)
     {
-        op3=ternaryUNMB(op1, op2);
-        op1=ternaryADDB(op1, op2);
-        op2=ternarySHL(op3, 1);
+        unsigned a=(op1 >> shift) & TRIT_MASK;
+        unsigned b=(op2 >> shift) & TRIT_MASK;
+        int sum;
+
+        if(a==2 || b==2)
+        {
+            result |= (trint32_t)2 << shift;
+            carry=0;
+            continue;
+        }
+
+        sum=((a==N) ? -1 : (int)a) +
+            ((b==N) ? -1 : (int)b) + carry;
+        result |= (trint32_t)ternary_add_sum[sum+3] << shift;
+        carry=ternary_add_carry[sum+3];
     }
-    return op1;
+    return result;
 }
 
 trint32_t ternaryADC  ( trint32_t op1, trint32_t op2, trit_t* carry )
 {
-    trint32_t op3;
-    trint32_t carryin=*carry;
-    trint32_t carryout=0;
-    // op1 = op1 + carryin
-    while(carryin)
+    trint32_t result=0;
+    int carryin=(*carry == N) ? -1 : (int)*carry;
+    unsigned shift;
+
+    if(carryin == 2)
     {
-        op3=ternaryUNMB(op1, carryin);
-        op1=ternaryADDB(op1, carryin);
-        carryout=ternaryADDB(op3 & TRINT32_MST_MASK, carryout);
-        carryin=ternarySHL(op3, 1);
+        carryin=0;
     }
-    // op1 = op1 + op2
-    while(op2)
+
+    for(shift=0; shift<BITS_PER_TRINT32_T; shift+=BITS_PER_TRIT)
     {
-        op3=ternaryUNMB(op1, op2);
-        op1=ternaryADDB(op1, op2);
-        carryout=ternaryADDB(op3 & TRINT32_MST_MASK, carryout);
-        op2=ternarySHL(op3, 1);
+        unsigned a=(op1 >> shift) & TRIT_MASK;
+        unsigned b=(op2 >> shift) & TRIT_MASK;
+        int sum;
+
+        if(a==2 || b==2)
+        {
+            result |= (trint32_t)2 << shift;
+            carryin=0;
+            continue;
+        }
+
+        sum=((a==N) ? -1 : (int)a) +
+            ((b==N) ? -1 : (int)b) + carryin;
+        result |= (trint32_t)ternary_add_sum[sum+3] << shift;
+        carryin=ternary_add_carry[sum+3];
     }
-    *carry = carryout >> (BITS_PER_TRINT32_T-BITS_PER_TRIT);
-    return op1;
+
+    *carry = (carryin < 0) ? N : (trit_t)carryin;
+    return result;
 }
 // 000 => 0
 // --- => -
