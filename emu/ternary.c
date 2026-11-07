@@ -328,45 +328,74 @@ trint32_t ternarySGN  ( trint32_t op1 )
 
 trint32_t ternarySHL  ( trint32_t op1, trint32_t op2 )
 {
-    int shift=ternary2int(op2)*2;
+    static const int pow3[6] = {1, 3, 9, 27, 81, 243};
+    int shift=0;
+    int i;
+
+    if(op2 >> (6 * BITS_PER_TRIT))
+    {
+        return 0;
+    }
+
+    for(i=0; i<6; i++)
+    {
+        shift += trit2int((op2 >> (i * BITS_PER_TRIT)) & TRIT_MASK) * pow3[i];
+    }
+
+    if(shift>=TRITS_PER_TRINT32_T || shift<=-TRITS_PER_TRINT32_T)
+    {
+        return 0;
+    }
+
+    shift *= BITS_PER_TRIT;
     if(shift<0)
     {
         return op1 >> (unsigned)(-shift);
     }
     else
     {
-        return op1 << shift;
+        return op1 << (unsigned)shift;
     }
 }
 
 void      ternaryROL  ( trint32_t* op1, trint32_t* op2, trint32_t rotate, int triwordsize )
 {
-    const int maxShift = triwordsize * 2;
-    const int wordMask = (1ULL << maxShift) - 1;
-    trint32_t op1_in=(*op1) & wordMask;
-    trint32_t op2_in=(*op2) & wordMask;
-    // Map trit rotate to a minimal shift in bits
-    int bshift=(ternary2int(rotate) * 2)  % (maxShift * 2);
-    if(bshift<0)
+    unsigned word_bits;
+    unsigned total_bits;
+    uint64_t word_mask;
+    unsigned __int128 pair;
+    unsigned __int128 mask;
+    unsigned rotate_bits;
+    int shift;
+
+    if( triwordsize <= 0 )
     {
-        bshift += maxShift;
-    }
-    else
-    {
-        bshift -= maxShift;
+        return;
     }
 
-    if( bshift < 0 )
+    word_bits = (unsigned)triwordsize * BITS_PER_TRIT;
+    total_bits = word_bits * 2;
+    word_mask = (word_bits >= 64) ? ~(uint64_t)0 : ((1ULL << word_bits) - 1);
+    mask = (total_bits >= 128) ? ~(unsigned __int128)0 : (((unsigned __int128)1 << total_bits) - 1);
+
+    pair = (((unsigned __int128)((*op1) & word_mask)) << word_bits) |
+           (unsigned __int128)((*op2) & word_mask);
+
+    shift = (int)(ternary2int(rotate) % triwordsize);
+    if( shift < 0 )
     {
-        bshift = -bshift;
-        *op1= ((op1_in >> bshift) | (op2_in << ( maxShift - bshift))) & wordMask;
-        *op2= ((op2_in >> bshift) | (op1_in << ( maxShift - bshift))) & wordMask;
+        shift += triwordsize;
     }
-    else
+    rotate_bits = (unsigned)shift * BITS_PER_TRIT;
+
+    if( rotate_bits )
     {
-        *op1= ((op1_in << bshift) | (op2_in >> ( maxShift - bshift))) & wordMask;
-        *op2= ((op2_in << bshift) | (op1_in >> ( maxShift - bshift))) & wordMask;
+        pair = ((pair << rotate_bits) |
+                (pair >> (total_bits - rotate_bits))) & mask;
     }
+
+    *op1 = (trint32_t)((pair >> word_bits) & word_mask);
+    *op2 = (trint32_t)(pair & word_mask);
 }
 
 //trint32_t ternaryRCL  ( trint32_t op1, trint32_t op2, trit_t* carry )
