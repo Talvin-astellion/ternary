@@ -123,7 +123,7 @@ int64_t ternary2int( trint32_t x )
 {
     int64_t total=0;
     int i;
-    for(i=58; i>=0; i-=2)
+    for(i=BITS_PER_TRINT32_T-BITS_PER_TRIT; i>=0; i-=BITS_PER_TRIT)
     {
         total *= 3;
         total += trit2int( (x >> i) & TRIT_MASK );
