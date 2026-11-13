@@ -1,0 +1,7 @@
+- Verified:
+- make -C work ternary-linux-check
+- make -C work ternary-linux-build
+- make -C work ternary-linux-userspace
+- make -C work ternary-linux-run → TERNARY_LINUX_OK
+- QEMU boot with -initrd → TERNARY_LINUX_OK
+- git diff --check clean

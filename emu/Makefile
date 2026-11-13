@@ -1,8 +1,9 @@
 # Quick Makefile
 
 PKG=tern-cpu-emu
+GUEST=tern-linux
 SRCEXT=.c
-SRCS=$(wildcard *$(SRCEXT))
+SRCS=$(filter-out rv32.c,$(wildcard *$(SRCEXT)))
 STRIP=strip
 CC=gcc
 CFLAGS=-Wall -Ofast
@@ -26,7 +27,14 @@ $(PKG): $(OBJS)
 	$(CC) $(LIBS) $(CFLAGS) $(OBJS) -o $(PKG)
 	$(STRIP) $(PKG)
 
-pkg: $(PKG)
+pkg: $(PKG) $(GUEST)
+
+linux: $(GUEST)
+
+$(GUEST): rv32.c
+	@echo "Generating $@"
+	$(CC) $(CFLAGS) rv32.c -o $@
+	$(STRIP) $@
 
 
 tern-test: ternary.c ternary.h
@@ -78,7 +86,7 @@ clean: clean-obj clean-asm
 	rm -rf *~
 
 clean-pkg: clean clean-dep
-	rm -rf $(PKG) tern-test
+	rm -rf $(PKG) $(GUEST) tern-test
 
 rebuild: clean-pkg pkg
 
