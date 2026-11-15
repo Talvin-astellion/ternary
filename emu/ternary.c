@@ -445,10 +445,10 @@ void      ternaryROL  ( trint32_t* op1, trint32_t* op2, trint32_t rotate, int tr
     pair = (((unsigned __int128)((*op1) & word_mask)) << word_bits) |
            (unsigned __int128)((*op2) & word_mask);
 
-    shift = (int)(ternary2int(rotate) % triwordsize);
+    shift = (int)(ternary2int(rotate) % (triwordsize * 2));
     if( shift < 0 )
     {
-        shift += triwordsize;
+        shift += triwordsize * 2;
     }
     rotate_bits = (unsigned)shift * BITS_PER_TRIT;
 

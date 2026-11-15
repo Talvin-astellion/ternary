@@ -77,8 +77,8 @@ An [emulator](emu/) which contains an library for performing ternary operations
 is the first piece of software written on this project. It is needed to to test
 the design and anything  written for it.
 
-A cross-assembler will be probably be second as it will make writing tests for
-the emulator easier.
+A macro-based cross-assembler lives in [asm/](asm/) and uses the C preprocessor
+to turn `.tas` sources into loadable `.trt` files.
 
 At some point a simple forth like environment based on a port of
 [JONESFORTH](https://rwmj.wordpress.com/2010/08/07/jonesforth-git-repository/) .
@@ -150,7 +150,7 @@ storage of information digits needs by symbol differentiation.
 - [x] Trinary Print should support different fixed widths
 - [x] Add disassembler to emulator monitor
 - [x] Load RAM from File
-- [ ] Assembler
+- [x] Macro-based cross-assembler; standalone preprocessor still incomplete
 - [x] Expand math operations to cover a full 32 Trits
 - [ ] Trinary I/O should be more generic
     - [ ] Work with strings

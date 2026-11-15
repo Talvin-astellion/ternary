@@ -46,6 +46,15 @@ static void testMulHi( void )
     CHECK( ternary2int( ternaryMULHI( 0, a ) ) == 0 );
 }
 
+static void testRotatePair( void )
+{
+    trint32_t high = ternaryFromInt64( 3 );
+    trint32_t low = ternaryFromInt64( 1 );
+    ternaryROL( &high, &low, ternaryFromInt64( 27 ), TRITS_PER_WORD );
+    CHECK( ternary2int( high ) == 1 );
+    CHECK( ternary2int( low ) == 3 );
+}
+
 static void testRegisterValidation( void )
 {
     TriCpu cpu;
@@ -106,6 +115,7 @@ int main( void )
     testIntegerRoundTrip();
     testParse();
     testMulHi();
+    testRotatePair();
     testRegisterValidation();
     testMemory();
     testAddCarry();

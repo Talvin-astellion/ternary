@@ -128,6 +128,15 @@
 #define ADSI( R1, IMM1, IMM2 ) \
   INST1_2IMM( ---00+, R1, IMM1, IMM2 )
 
+#define MUL( R1, R2, R2MOD, R3, R3MOD ) \
+  INST3( ---0+-, R1, R2, R2MOD, R3, R3MOD )
+
+#define MULU( R1, R2, R2MOD, R3, R3MOD ) \
+  INST3( ---0+0, R1, R2, R2MOD, R3, R3MOD )
+
+#define MULI( DST, SRC, MOD,  IMM ) \
+  INST2( ---0++, DST, SRC, MOD, IMM )
+
 #define RTL( R1, R2, R2MOD, R3, R3MOD ) \
   INST3( ---+--, R1, R2, R2MOD, R3, R3MOD )
 
@@ -145,13 +154,13 @@
   INST3( ---+0+, R1, R2, R2MOD, R3, R3MOD )
 
 #define TMUL( R1, R2, R2MOD, R3, R3MOD ) \
-  INST3( ---0+-, R1, R2, R2MOD, R3, R3MOD )
+  INST3( ---++-, R1, R2, R2MOD, R3, R3MOD )
 
 #define TMIN( R1, R2, R2MOD, R3, R3MOD ) \
-  INST3( ---0+0, R1, R2, R2MOD, R3, R3MOD )
+  INST3( ---++0, R1, R2, R2MOD, R3, R3MOD )
 
 #define TMAX( R1, R2, R2MOD, R3, R3MOD ) \
-  INST3( ---0++, R1, R2, R2MOD, R3, R3MOD )
+  INST3( ---+++, R1, R2, R2MOD, R3, R3MOD )
 
 #define RTLI( DST, SRC, MOD,  IMM ) \
   INST2( --0---, DST, SRC, MOD, IMM )

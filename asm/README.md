@@ -4,9 +4,29 @@ Assembly
 ## Files
 | Files      | Description                                                    |
 -------------|----------------------------------------------------------------|
-|yamp.py     | Yet Another Macro Preprocessor used to provide macros          |
-|aliases.ymp | Standard set of macros for use with assembler                  |
+|yamp.py     | Experimental standalone macro preprocessor                     |
+|assembler.inc | Instruction macros, registers, modifiers and immediate encoding |
+|aliases.ymp | Optional pseudo-instructions such as `MV`, `JMP` and `SWP`     |
+|examples/   | Example `.tas` programs assembled into `out/*.trt`             |
+|tests/      | Encoding and emulator smoke tests                              |
 
+The Makefile uses the system C preprocessor (`gcc -E -xc`) and automatically
+includes `assembler.inc` and `aliases.ymp`.  `yamp.py` is a partial standalone
+replacement and is not used by the default build yet.
+
+## Build and test
+
+```sh
+make -C asm              # assemble asm/examples/*.tas into asm/out/*.trt
+make -C asm test         # assemble and run encoding + emulator smoke tests
+make -C asm clean        # remove asm/out
+```
+
+Run an assembled program with the emulator:
+
+```sh
+./emu/tern-cpu-emu asm/out/fib.trt
+```
 
 ## Code
 
