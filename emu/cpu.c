@@ -32,6 +32,9 @@
 #include "cpu.h"
 #include "disassem.h"
 #include "mem.h"
+#include "symbolic.h"
+#include "taint.h"
+#include "trace.h"
 
 #include <stdio.h>
 /* Defines *******************************************************************/
@@ -310,7 +313,10 @@ void runCPU( TriCpu* cpu, int cycles )
 
     while( cycles-- > 0 )
     {
-        parseInstruction( &inst, ReadTriWord(cpu, cpu->regs[REG_PC]) );
+        TriWord rawInst = ReadTriWord(cpu, cpu->regs[REG_PC]);
+        parseInstruction( &inst, rawInst );
+        traceInstruction( cpu, rawInst );
+        taintStepBefore( cpu, rawInst );
         cpu->regs[REG_PC]=ternaryADD(cpu->regs[REG_PC], 0b0100);
 
         switch( inst.opcode )
@@ -547,6 +553,9 @@ void runCPU( TriCpu* cpu, int cycles )
          * instruction.  In particular the carry flag must survive both
          * subsequent instructions and returns to the monitor. */
         cpu->regs[REG_FLAGS]=flagReg.val;
+        taintStepAfter( cpu );
+        traceSetTaint( taintRegMask(), taintMemCount() );
+        symStep( cpu, rawInst );
     }
 }
 

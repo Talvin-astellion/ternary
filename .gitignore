@@ -41,6 +41,8 @@ emu/test-core
 emu/test-core-san
 emu/test-tml
 emu/test-tml-san
+emu/test-phase2
+emu/test-phase2-san
 asm/out/
 
 # Debug files

@@ -34,6 +34,9 @@
 #include "mem.h"
 #include "tml.h"
 #include "tml_policy.h"
+#include "trace.h"
+#include "taint.h"
+#include "symbolic.h"
 #include <stdio.h>
 #include <ctype.h>
 #include <string.h>
@@ -110,6 +113,8 @@ static void printHelp( void )
     printf(" l : Print the tail of the TML Always Memory log\n");
     printf(" o +|-|0 : Human oversight override\n");
     printf(" u : Recover from TML FREEZE with the unfreeze token\n");
+    printf(" x : Print taint state (requires --taint)\n");
+    printf(" y : Print collected symbolic constraints\n");
     printf(" <Enter> : Step one instruction\n");
     printf(" ? : help\n");
 }
@@ -133,7 +138,10 @@ int main( int argc, char** argv )
     const char* inputFile = NULL;
     const char* logPath = NULL;
     const char* policyPath = NULL;
+    const char* tracePath = NULL;
+    const char* symbolicPath = NULL;
     int tmlEnabled = 0;
+    int taintOn = 0;
     int i;
 
     memset( &tml, 0, sizeof( tml ) );
@@ -173,6 +181,36 @@ int main( int argc, char** argv )
             policyPath = argv[i] + 13;
             tmlEnabled = 1;
         }
+        else if( 0 == strcmp( argv[i], "--trace" ) )
+        {
+            if( ++i >= argc )
+            {
+                fprintf( stderr, "--trace requires a path\n" );
+                return 2;
+            }
+            tracePath = argv[i];
+        }
+        else if( 0 == strncmp( argv[i], "--trace=", 8 ) )
+        {
+            tracePath = argv[i] + 8;
+        }
+        else if( 0 == strcmp( argv[i], "--taint" ) )
+        {
+            taintOn = 1;
+        }
+        else if( 0 == strcmp( argv[i], "--symbolic" ) )
+        {
+            if( ++i >= argc )
+            {
+                fprintf( stderr, "--symbolic requires a path\n" );
+                return 2;
+            }
+            symbolicPath = argv[i];
+        }
+        else if( 0 == strncmp( argv[i], "--symbolic=", 11 ) )
+        {
+            symbolicPath = argv[i] + 11;
+        }
         else if( 0 == strcmp( argv[i], "-h" ) || 0 == strcmp( argv[i], "--help" ) )
         {
             printHelp();
@@ -206,6 +244,21 @@ int main( int argc, char** argv )
     }
 
     resetCPU(&cpu);
+    if( tracePath != NULL && traceInit( tracePath ) != 0 )
+    {
+        fprintf( stderr, "Unable to open trace file: %s\n", tracePath );
+        return 2;
+    }
+    if( taintOn && taintInit() != 0 )
+    {
+        fprintf( stderr, "Unable to allocate taint state\n" );
+        return 2;
+    }
+    if( symbolicPath != NULL && symInit( symbolicPath ) != 0 )
+    {
+        fprintf( stderr, "Unable to open symbolic constraint file: %s\n", symbolicPath );
+        return 2;
+    }
     if( tmlEnabled )
     {
         if( tmlInit( &tml, &policy, 1 ) != 0 )
@@ -369,6 +422,14 @@ int main( int argc, char** argv )
                 printf("TML unfreeze rejected (system is not frozen or token is invalid)\n");
             }
         }
+        else if( 0 == strcmp( cmd, "x" ) )
+        {
+            taintPrint( stdout );
+        }
+        else if( 0 == strcmp( cmd, "y" ) )
+        {
+            symPrint( stdout );
+        }
         else if( 0 == strcmp( cmd, "h" ) || 0 == strcmp( cmd, "?" ) )
         {
             printHelp();
@@ -394,5 +455,8 @@ prompt:
     {
         tmlShutdown( &tml );
     }
+    traceShutdown();
+    symShutdown();
+    taintShutdown();
     return 0;
 }

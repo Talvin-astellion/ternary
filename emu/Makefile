@@ -66,11 +66,13 @@ $(DEPDIR)/%.d: %$(SRCEXT) | $(DEPDIR)
 asms: $(ASMS)
 
 
-CORE_SRCS=cpu.c mem.c disassem.c ternary.c tml.c tml_log.c tml_policy.c sha256.c
+CORE_SRCS=cpu.c mem.c disassem.c ternary.c tml.c tml_log.c tml_policy.c sha256.c trace.c taint.c symbolic.c
 TESTBIN=test-core
 TMLTESTBIN=test-tml
+PHASE2TESTBIN=test-phase2
 TEST_SRCS=tests/test_core.c $(CORE_SRCS)
 TML_TEST_SRCS=tests/test_tml.c $(CORE_SRCS)
+PHASE2_TEST_SRCS=tests/test_phase2.c $(CORE_SRCS)
 
 $(TESTBIN): $(TEST_SRCS) cpu.h mem.h ternary.h disassem.h tests/test_core.c
 	@echo "Generating $@"
@@ -80,17 +82,25 @@ $(TMLTESTBIN): $(TML_TEST_SRCS) cpu.h mem.h ternary.h tml.h tml_policy.h tests/t
 	@echo "Generating $@"
 	$(CC) $(CFLAGS) $(TML_TEST_SRCS) -o $@
 
-test: $(TESTBIN) $(TMLTESTBIN)
+$(PHASE2TESTBIN): $(PHASE2_TEST_SRCS) cpu.h mem.h trace.h taint.h symbolic.h tests/test_phase2.c
+	@echo "Generating $@"
+	$(CC) $(CFLAGS) $(PHASE2_TEST_SRCS) -o $@
+
+test: $(TESTBIN) $(TMLTESTBIN) $(PHASE2TESTBIN)
 	./$(TESTBIN)
 	./$(TMLTESTBIN)
+	./$(PHASE2TESTBIN)
 
 sanitize:
 	$(CC) -g -O1 -Wall -Wextra -fsanitize=address,undefined \
 		$(TEST_SRCS) -o $(TESTBIN)-san
 	$(CC) -g -O1 -Wall -Wextra -fsanitize=address,undefined \
 		$(TML_TEST_SRCS) -o $(TMLTESTBIN)-san
+	$(CC) -g -O1 -Wall -Wextra -fsanitize=address,undefined \
+		$(PHASE2_TEST_SRCS) -o $(PHASE2TESTBIN)-san
 	./$(TESTBIN)-san
 	./$(TMLTESTBIN)-san
+	./$(PHASE2TESTBIN)-san
 
 #install: $(PKG)
 #	cp $(PKG) $(PREFIX)/bin/
@@ -109,7 +119,7 @@ clean: clean-obj clean-asm
 	rm -rf *~
 
 clean-pkg: clean clean-dep
-	rm -rf $(PKG) $(GUEST) tern-test $(TESTBIN) $(TESTBIN)-san $(TMLTESTBIN) $(TMLTESTBIN)-san
+	rm -rf $(PKG) $(GUEST) tern-test $(TESTBIN) $(TESTBIN)-san $(TMLTESTBIN) $(TMLTESTBIN)-san $(PHASE2TESTBIN) $(PHASE2TESTBIN)-san
 
 rebuild: clean-pkg pkg
 
