@@ -37,6 +37,8 @@
 *.hex
 tern-cpu-emu
 tern-linux
+emu/test-core
+emu/test-core-san
 asm/out/
 
 # Debug files

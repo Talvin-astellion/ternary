@@ -73,6 +73,60 @@ static const char* reg_names[] =
 /* Functions *****************************************************************/
 
 /**
+ * A register field is three trits encoded in six bits.  Binary 10 is the
+ * undefined trit value and must never be used as a register index.
+ */
+static int validRegCode( Tryte reg )
+{
+    unsigned i;
+    if( reg >= NUM_TRIREGS )
+    {
+        return 0;
+    }
+    for( i = 0; i < 3; ++i )
+    {
+        if( ( ( reg >> ( i * BITS_PER_TRIT ) ) & TRIT_MASK ) == 2 )
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/**
+ * Convert a balanced-ternary register number (-13..13) into its three-trit
+ * register code.
+ */
+static Tryte regCodeFromInt( int v )
+{
+    Tryte code = 0;
+    int i;
+    for( i = 0; i < 3; ++i )
+    {
+        int r = v % 3;
+        int q = v / 3;
+        if( r == 2 )
+        {
+            r = -1;
+            q += 1;
+        }
+        else if( r == -2 )
+        {
+            r = 1;
+            q -= 1;
+        }
+        code |= (Tryte)( ( r < 0 ) ? N : (trit_t)r ) << ( i * BITS_PER_TRIT );
+        v = q;
+    }
+    return code;
+}
+
+static void setSignTrit( FlagReg* flags, TriWord val )
+{
+    flags->flags.S = ternarySGN( val );
+}
+
+/**
  * [Description]
  *
  * @param
@@ -138,7 +192,7 @@ void WriteTryte( TriCpu* cpu, TriWord addr , Tryte val )
 TriWord ReadModReg( TriCpu* cpu, Tryte reg, Tryte mod )
 {
     TriWord val=0;
-    if( 0 != reg )
+    if( 0 != reg && validRegCode( reg ) )
     {
         val = cpu->regs[reg];
     }
@@ -159,7 +213,8 @@ TriWord ReadModReg( TriCpu* cpu, Tryte reg, Tryte mod )
             break;
 
         default:
-            printf("\nInvalid  mod: %X\n", mod);
+            // Undefined shift modifier: leave the value unchanged.
+            break;
     }
 
     return apply_tritwise_gate1( mod & ((1<<(3 * BITS_PER_TRIT)) - 1), val );
@@ -175,7 +230,7 @@ void SetSignTrit( TriCpu* cpu, TriWord val )
 {
     FlagReg tmp;
     tmp.val=cpu->regs[REG_FLAGS];
-    tmp.flags.S=ternarySGN(val);
+    setSignTrit(&tmp, val);
     cpu->regs[REG_FLAGS]=tmp.val;
 }
 
@@ -188,7 +243,7 @@ void SetSignTrit( TriCpu* cpu, TriWord val )
  */
 void WriteReg( TriCpu* cpu, Tryte reg, TriWord val )
 {
-    if( 0 != reg )
+    if( 0 != reg && validRegCode( reg ) )
     {
         cpu->regs[reg] = val;
     }
@@ -202,16 +257,14 @@ void printCpuState(TriCpu* cpu)
 {
     TriCpu disposable;
     TriWord inst;
-    Tryte i = 0b00111111;
-    int x = -13;
+    int x;
     printf("             876543210876543210876543210\n");
-    while( 0b00010101 != i )
+    for( x = -13; x <= 13; ++x )
     {
+        Tryte reg = regCodeFromInt( x );
         printf(" %s %03d : ", reg_names[x+13], x);
-        ternaryPrint(cpu->regs[i], TRITS_PER_WORD);
-        printf("(%"PRIi64")\n", ternary2int(TRIWORD_MASK&(cpu->regs[i])));
-        i=ternaryADD(i, 0b0001);
-        ++x;
+        ternaryPrint(cpu->regs[reg], TRITS_PER_WORD);
+        printf("(%"PRIi64")\n", ternary2int(TRIWORD_MASK&(cpu->regs[reg])));
     }
     printf("             876543210876543210876543210\n");
     printf("            |    Immed 18     |R1|OpCode|\n");
@@ -267,52 +320,52 @@ void runCPU( TriCpu* cpu, int cycles )
             case OPCODE_LD1       :  // Load Rd <- (Rs+immediate) 9 trits
                 val = ReadTryte(cpu, ternaryADD(ReadModReg(cpu, inst.r2, inst.r2mod), inst.imm11));
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_LD2       :  // Load Rd <- (Rs+immediate) 18 trits
                 addr = ternaryADD(ReadModReg(cpu, inst.r2, inst.r2mod), inst.imm11);
                 val=ReadTryte(cpu, addr);
                 val|=((TriWord)ReadTryte(cpu, ternaryADD(addr, 0b0001))<<BITS_PER_TRYTE) ;
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_LD3       :  // Load Rd <- (Rs+immediate) 27 trits
                 val=ReadTriWord(cpu, ternaryADD(ReadModReg(cpu, inst.r2, inst.r2mod), inst.imm11));
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_ST1       :  // Store (Rs1+immediate) <- Rs2 9 trits
                 addr = ternaryADD(ReadModReg(cpu, inst.r1, OPMOD_NOP), inst.imm11);
                 val = ReadModReg(cpu, inst.r2, inst.r2mod) & TRYTE_MASK ;
                 WriteTryte(cpu,addr,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_ST2       :  // Store (Rs1+immediate) <- Rs2 18 trits
                 addr = ternaryADD(ReadModReg(cpu, inst.r1, OPMOD_NOP), inst.imm11);
                 val = ReadModReg(cpu, inst.r2, inst.r2mod) & ((1ULL << (2*BITS_PER_TRYTE))-1);
                 WriteTryte(cpu,addr,val & TRYTE_MASK);
                 WriteTryte(cpu,ternaryADD(addr, 0b0001),(val >> BITS_PER_TRYTE)& TRYTE_MASK);
-                SetSignTrit(cpu, val );
+                setSignTrit(&flagReg, val );
                 break;
             case OPCODE_ST3       :  // Store (Rs1+immediate) <- Rs2 27 trits
                 addr = ternaryADD(ReadModReg(cpu, inst.r1, OPMOD_NOP), inst.imm11);
                 val = ReadModReg(cpu, inst.r2, inst.r2mod);
                 WriteTriWord(cpu,addr,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_POP       :  // Load Rd <- (Rs) ; Rs <- Rs + immediate
                 addr = ReadModReg(cpu, inst.r2, inst.r2mod);
                 val=ReadTriWord(cpu, addr);
                 WriteReg(cpu,inst.r1,val);
                 WriteReg(cpu,inst.r2,ternaryADD(addr, inst.imm11));
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_PSH       :  // Store Rd += immediate; (Rd)  <- Rs
                 addr = ternaryADD(ReadModReg(cpu, inst.r1, OPMOD_NOP), inst.imm11);
                 val = ReadModReg(cpu, inst.r2, inst.r2mod);
                 WriteTriWord(cpu,addr,val);
                 WriteReg(cpu,inst.r1,addr);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
 //          case OPCODE_          :  //
             case OPCODE_ADC       :  // C:Rd = Rs1 + Rs2 + C
@@ -320,14 +373,14 @@ void runCPU( TriCpu* cpu, int cycles )
                 val=ternaryADC( ReadModReg(cpu, inst.r2, inst.r2mod), ReadModReg(cpu, inst.r3, inst.r3mod), &carry);
                 flagReg.flags.C = carry;
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_ADD       :  // C:Rd = Rs1 + Rs2
                 carry=0;
                 val=ternaryADC( ReadModReg(cpu, inst.r2, inst.r2mod), ReadModReg(cpu, inst.r3, inst.r3mod), &carry);
                 flagReg.flags.C = carry;
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_ADS       :  // if S==1 then C:Rd = Rd + Rs1; if S==- then C:Rd = Rd + Rs2
                 switch(flagReg.flags.S)
@@ -337,14 +390,14 @@ void runCPU( TriCpu* cpu, int cycles )
                         val=ternaryADC( ReadModReg(cpu, inst.r1, OPMOD_NOP), ReadModReg(cpu, inst.r2, inst.r2mod), &carry);
                         flagReg.flags.C = carry;
                         WriteReg(cpu,inst.r1,val);
-                        SetSignTrit(cpu, val);
+                        setSignTrit(&flagReg, val);
                         break;
                     case N:
                         carry=0;
                         val=ternaryADC( ReadModReg(cpu, inst.r1, OPMOD_NOP), ReadModReg(cpu, inst.r3, inst.r3mod), &carry);
                         flagReg.flags.C = carry;
                         WriteReg(cpu,inst.r1,val);
-                        SetSignTrit(cpu, val);
+                        setSignTrit(&flagReg, val);
                         break;
                 }
                 break;
@@ -353,14 +406,14 @@ void runCPU( TriCpu* cpu, int cycles )
                 val=ternaryADC( ReadModReg(cpu, inst.r2, inst.r2mod), inst.imm11, &carry);
                 flagReg.flags.C = carry;
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_ADDI      :  // C:Rd = Rs1 + immediate
                 carry=0;
                 val=ternaryADC( ReadModReg(cpu, inst.r2, inst.r2mod), inst.imm11, &carry);
                 flagReg.flags.C = carry;
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_ADSI       :  // if S==1 then C:Rd = Rd + imm1; if S==- then C:Rd = Rd + imm2
                 switch(flagReg.flags.S)
@@ -370,27 +423,31 @@ void runCPU( TriCpu* cpu, int cycles )
                         val=ternaryADC( ReadModReg(cpu, inst.r1, OPMOD_NOP), inst.imm9_1, &carry);
                         flagReg.flags.C = carry;
                         WriteReg(cpu,inst.r1,val);
-                        SetSignTrit(cpu, val);
+                        setSignTrit(&flagReg, val);
                         break;
                     case N:
                         carry=0;
                         val=ternaryADC( ReadModReg(cpu, inst.r1, OPMOD_NOP), inst.imm9_2, &carry);
                         flagReg.flags.C = carry;
                         WriteReg(cpu,inst.r1,val);
-                        SetSignTrit(cpu, val);
+                        setSignTrit(&flagReg, val);
                         break;
                 }
                 break;
             case OPCODE_MUL       :  // Rd = Rs1 * Rs2
                 val=ternaryMUL( ReadModReg(cpu, inst.r2, inst.r2mod), ReadModReg(cpu, inst.r3, inst.r3mod));
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
-//          case OPCODE_MULU      :  // Rd = (Rs1 * Rs2) >> 27
+            case OPCODE_MULU      :  // Rd = (Rs1 * Rs2) >> 27
+                val=ternaryMULHI( ReadModReg(cpu, inst.r2, inst.r2mod), ReadModReg(cpu, inst.r3, inst.r3mod));
+                WriteReg(cpu,inst.r1,val);
+                setSignTrit(&flagReg, val);
+                break;
             case OPCODE_MULI      :  // Rd = Rs1 * immediate
                 val=ternaryMUL( ReadModReg(cpu, inst.r2, inst.r2mod), inst.imm11);
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
 
             case OPCODE_RTL       :  // R1:R2 = R1:R2 Rotate Left by R3
@@ -404,37 +461,37 @@ void runCPU( TriCpu* cpu, int cycles )
             case OPCODE_TAND      :  // Rd = Tritwise Rs1 & Rs2
                 val=ternaryANDB( ReadModReg(cpu, inst.r2, inst.r2mod), ReadModReg(cpu, inst.r3, inst.r3mod));
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_TOR       :  // Rd = Tritwise Rs1 | Rs2
                 val=ternaryORRB( ReadModReg(cpu, inst.r2, inst.r2mod), ReadModReg(cpu, inst.r3, inst.r3mod));
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_TMAJ      :  // Rd = Tritwise Majority
                 val=ternaryUNMB( ReadModReg(cpu, inst.r2, inst.r2mod), ReadModReg(cpu, inst.r3, inst.r3mod));
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_TADD      :  // Rd = Tritwise Rs1 + Rs2
                 val=ternaryADDB( ReadModReg(cpu, inst.r2, inst.r2mod), ReadModReg(cpu, inst.r3, inst.r3mod));
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_TMUL      :  // Rd = Tritwise Rs1 * Rs2
                 val=ternaryMULB( ReadModReg(cpu, inst.r2, inst.r2mod), ReadModReg(cpu, inst.r3, inst.r3mod));
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_TMIN      :  // Rd = Tritwise MIN(Rs1, Rs2)
                 val=ternaryMINB( ReadModReg(cpu, inst.r2, inst.r2mod), ReadModReg(cpu, inst.r3, inst.r3mod));
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_TMAX      :  // Rd = Tritwise MAX(Rs1, Rs2)
                 val=ternaryMAXB( ReadModReg(cpu, inst.r2, inst.r2mod), ReadModReg(cpu, inst.r3, inst.r3mod));
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
 
             case OPCODE_RTLI      :  // R1:R2 = R1:R2 Rotate Left by immed
@@ -448,37 +505,37 @@ void runCPU( TriCpu* cpu, int cycles )
             case OPCODE_TANDI     :  // Rd = Tritwise Rs1 & immediate
                 val=ternaryANDB( ReadModReg(cpu, inst.r2, inst.r2mod), inst.imm11 );
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_TORI      :  // Rd = Tritwise Rs1 | immediate
                 val=ternaryORRB( ReadModReg(cpu, inst.r2, inst.r2mod), inst.imm11 );
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_TMAJI     :  // Rd = Tritwise Majority
                 val=ternaryUNMB( ReadModReg(cpu, inst.r2, inst.r2mod), inst.imm11 );
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_TADDI     :  // Rd = Tritwise Rs1 + immediate
                 val=ternaryADDB( ReadModReg(cpu, inst.r2, inst.r2mod), inst.imm11 );
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_TMULI     :  // Rd = Tritwise Rs1 * immediate
                 val=ternaryMULB( ReadModReg(cpu, inst.r2, inst.r2mod), inst.imm11 );
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_TMINI     :  // Rd = Tritwise MIN(Rs1, immediate)
                 val=ternaryMINB( ReadModReg(cpu, inst.r2, inst.r2mod), inst.imm11 );
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             case OPCODE_TMAXI     :  // Rd = Tritwise MAX(Rs1, immediate)
                 val=ternaryMAXB( ReadModReg(cpu, inst.r2, inst.r2mod), inst.imm11 );
                 WriteReg(cpu,inst.r1,val);
-                SetSignTrit(cpu, val);
+                setSignTrit(&flagReg, val);
                 break;
             default:
                 printf("\nInvalid  Opcode: %X\n", inst.opcode);
@@ -486,6 +543,10 @@ void runCPU( TriCpu* cpu, int cycles )
 
         }
 
+        /* Keep the architectural flag register in sync after every
+         * instruction.  In particular the carry flag must survive both
+         * subsequent instructions and returns to the monitor. */
+        cpu->regs[REG_FLAGS]=flagReg.val;
     }
 }
 

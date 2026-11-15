@@ -64,6 +64,8 @@ extern trit_t int2trit( int x );
 
 extern trit_t char2trit ( char c );
 extern int64_t ternary2int( trint32_t x );
+extern trint32_t ternaryFromInt64( int64_t x );
+extern int ternaryParse( const char* s, trint32_t* x );
 //extern trint32_t int2ternary( int64_t x, int lvl );
 
 /**
@@ -105,6 +107,7 @@ extern void      ternaryROL  ( trint32_t* op1, trint32_t* op2, trint32_t rotate,
 extern trint32_t ternaryADD  ( trint32_t op1, trint32_t op2 );
 extern trint32_t ternaryADC  ( trint32_t op1, trint32_t op2, trit_t* carry );
 extern trint32_t ternaryMUL  ( trint32_t op1, trint32_t op2 );
+extern trint32_t ternaryMULHI( trint32_t op1, trint32_t op2 );
 //extern trint32_t ternaryDIVMOD  ( trint32_t op1, trint32_t op2 );
 
 #endif /* TERNARY_MATH_H */

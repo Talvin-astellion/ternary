@@ -34,7 +34,11 @@
 #include "mem.h"
 #include <stdio.h>
 #include <ctype.h>
+#include <string.h>
+
 /* Defines *******************************************************************/
+#define LINE_SIZE 256
+
 /* Types *********************************************************************/
 /* Interfaces ****************************************************************/
 /* Data **********************************************************************/
@@ -46,7 +50,7 @@ static int fileToMem( const char* fname , int verbose)
     filein = fopen(fname,"r");
     if(filein == NULL)
     {
-        printf("Error in opening file \"%s\".", fname);
+        printf("Error in opening file \"%s\".\n", fname);
     }
     else
     {
@@ -54,6 +58,53 @@ static int fileToMem( const char* fname , int verbose)
         fclose(filein);
     }
     return returnVal;
+}
+
+/**
+ * Read one line from stdin, stripping the trailing newline.
+ *
+ * @return 1 on success, 0 on EOF
+ */
+static int readLine( char* buf, size_t size )
+{
+    size_t len;
+    if( NULL == fgets( buf, (int)size, stdin ) )
+    {
+        return 0;
+    }
+    len = strlen( buf );
+    while( len > 0 &&
+           ( buf[len-1] == '\n' || buf[len-1] == '\r' ) )
+    {
+        buf[--len] = '\0';
+    }
+    return 1;
+}
+
+static int parseTri( const char* text, TriWord* out )
+{
+    trint32_t value;
+    if( NULL == text || ternaryParse( text, &value ) < 0 )
+    {
+        return -1;
+    }
+    *out = value;
+    return 0;
+}
+
+static void printHelp( void )
+{
+    printf("Help for Ternary Computer Emulator\n");
+    printf("NOTE: Addresses and values are entered in balanced ternary (10-).\n");
+    printf(" q : Quit\n");
+    printf(" s : Print CPU State\n");
+    printf(" r <ADDR> : Peek value of Tryte at Address\n");
+    printf(" w <ADDR> <VAL> : Poke Value to Tryte at Address\n");
+    printf(" c : Reset CPU\n");
+    printf(" m : Reset Memory\n");
+    printf(" f <FILE> : Read file into memory\n");
+    printf(" <Enter> : Step one instruction\n");
+    printf(" ? : help\n");
 }
 
 /**
@@ -65,103 +116,107 @@ static int fileToMem( const char* fname , int verbose)
  */
 int main( int argc, char** argv )
 {
-    char name[80];
-    char c='\r';
-    int i;
+    char line[LINE_SIZE];
+    char* cmd;
     TriCpu cpu;
     TriWord addr;
     TriWord val;
-    TriCpu disposable;
+
     resetMem();
     if( argc > 1 )
     {
-        i=fileToMem(argv[1], 1);
-        if(i)
+        int rc = fileToMem(argv[1], 1);
+        if( rc )
         {
-            return i;
+            return rc;
         }
     }
-    resetCPU(&disposable);
+
     resetCPU(&cpu);
     printCpuState(&cpu);
     printf("\n\nh for help, <Enter> for step: \n");
-    c=getchar();
-    while ('q' != c)
+
+    while( readLine( line, sizeof( line ) ) )
     {
-        switch(c)
+        cmd = strtok( line, " \t" );
+        if( NULL == cmd )
         {
-            case 'r':
-                printf("ADDR: ");
-                ternaryScan( &addr );
-                printf("\nVAL: ");
+            runCPU(&cpu, 1);
+            printCpuState(&cpu);
+        }
+        else if( 0 == strcmp( cmd, "q" ) )
+        {
+            break;
+        }
+        else if( 0 == strcmp( cmd, "s" ) )
+        {
+            printCpuState(&cpu);
+        }
+        else if( 0 == strcmp( cmd, "r" ) )
+        {
+            char* arg = strtok( NULL, " \t" );
+            if( NULL == arg || parseTri( arg, &addr ) != 0 )
+            {
+                printf("usage: r <ADDR>\n");
+            }
+            else
+            {
                 val = ReadAddr(addr);
                 ternaryPrint( val, TRITS_PER_TRYTE );
                 printf("(%"PRIi64")\n", ternary2int(val));
-                break;
-            case 'w':
-                printf("ADDR: ");
-                ternaryScan( &addr );
-                printf("\nVAL: ");
-                ternaryScan( &val );
+            }
+        }
+        else if( 0 == strcmp( cmd, "w" ) )
+        {
+            char* arg1 = strtok( NULL, " \t" );
+            char* arg2 = strtok( NULL, " \t" );
+            if( NULL == arg1 || NULL == arg2 ||
+                parseTri( arg1, &addr ) != 0 ||
+                parseTri( arg2, &val ) != 0 )
+            {
+                printf("usage: w <ADDR> <VAL>\n");
+            }
+            else
+            {
                 WriteAddr(addr, val);
                 printf("done.\n");
-                break;
-            case 's':
-                getchar();
-                printCpuState(&cpu);
-                break;
-            case 'c':
-                getchar();
-                resetCPU(&cpu);
-                printCpuState(&cpu);
-                break;
-            case 'm':
-                getchar();
-                resetMem();
-                printCpuState(&cpu);
-                break;
-            case 'f':
-                printf("filename: ");
-                do
-                {
-                    c=getchar();
-                }
-                while( isspace(c) );
-                i=0;
-                while( !isspace(c) )
-                {
-                    if(i<sizeof(name)-1)
-                    {
-                        name[i++]=c;
-                    }
-                    c=getchar();
-                }
-                name[i]='\0';
-                if(0==fileToMem( name , 1))
-                {
-                    printf("Done. Press c to Reset CPU or s to Print CPU State.\n");
-                }
-                break;
-            case 'h':
-            case '?':
-                getchar();
-                printf("Help for Ternary Computer Emulator \n");
-                printf("NOTE: Addresses and values are entered in balanced ternary(10-). \n");
-                printf(" q : Quit\n");
-                printf(" s : Print CPU State\n");
-                printf(" r <ADDR> : Peek value of Tryte at Address\n");
-                printf(" w <ADDR> <VAL> : Poke Value to Tryte at Address\n");
-                printf(" c : Reset CPU\n");
-                printf(" m : Reset Memory\n");
-                printf(" f : Read file into memory\n");
-                printf(" ? : help\n");
-                break;
-            default:
-                runCPU(&cpu, 1);
-                printCpuState(&cpu);
+            }
         }
+        else if( 0 == strcmp( cmd, "c" ) )
+        {
+            resetCPU(&cpu);
+            printCpuState(&cpu);
+        }
+        else if( 0 == strcmp( cmd, "m" ) )
+        {
+            resetMem();
+            printCpuState(&cpu);
+        }
+        else if( 0 == strcmp( cmd, "f" ) )
+        {
+            char* fname = strtok( NULL, " \t" );
+            if( NULL == fname )
+            {
+                printf("usage: f <FILE>\n");
+            }
+            else if( 0 == fileToMem( fname, 1 ) )
+            {
+                printf("Done. Press c to Reset CPU or s to Print CPU State.\n");
+            }
+        }
+        else if( 0 == strcmp( cmd, "h" ) || 0 == strcmp( cmd, "?" ) )
+        {
+            printHelp();
+        }
+        else
+        {
+            /* Preserve the historical behaviour: an unknown command is
+             * treated as a request to step. */
+            runCPU(&cpu, 1);
+            printCpuState(&cpu);
+        }
+
         printf("\n\nh for help, <Enter> for step: \n");
-        c=getchar();
     }
     return 0;
 }

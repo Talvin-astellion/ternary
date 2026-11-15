@@ -131,6 +131,67 @@ int64_t ternary2int( trint32_t x )
     return total;
 }
 
+trint32_t ternaryFromInt64( int64_t x )
+{
+    trint32_t result=0;
+    int i;
+    for(i=0; i<TRITS_PER_TRINT32_T; ++i)
+    {
+        int r = (int)( x % 3 );
+        x /= 3;
+        if( r == 2 )
+        {
+            r = -1;
+            x += 1;
+        }
+        else if( r == -2 )
+        {
+            r = 1;
+            x -= 1;
+        }
+        result |= (trint32_t)( ( r < 0 ) ? N : (trit_t)r ) << ( i * BITS_PER_TRIT );
+    }
+    return result;
+}
+
+int ternaryParse( const char* s, trint32_t* x )
+{
+    trint32_t dst=0;
+    int count=0;
+    int started=0;
+
+    if( !s || !x )
+    {
+        return -1;
+    }
+
+    for( ; *s; ++s )
+    {
+        trit_t t = char2trit( *s );
+        if( 2 != t )
+        {
+            if( 1 == started && count >= TRITS_PER_TRINT32_T )
+            {
+                break;
+            }
+            dst = (dst << BITS_PER_TRIT) | ( t & TRIT_MASK );
+            ++count;
+            started=1;
+        }
+        else if( started )
+        {
+            break;
+        }
+    }
+
+    if( 0 == count )
+    {
+        return -1;
+    }
+    *x=dst;
+    return count;
+}
+
 //trint32_t int2ternary( int64_t x, int lvl );
 //{
 //	trint32_t retVal=0;
@@ -191,7 +252,10 @@ void ternaryScan( trint32_t* x )
 
     while( state && count )
     {
-        scanf("%c",&c);
+        if( scanf("%c",&c) != 1 )
+        {
+            break;
+        }
         t=char2trit(c) & TRIT_MASK;
         if( 2 != t )
         {
@@ -510,6 +574,23 @@ trint32_t ternaryMUL  ( trint32_t op1, trint32_t op2 )
         op2 >>= BITS_PER_TRIT;
     }
     return product;
+}
+
+/*
+ * High part of a multiplication: (op1 * op2) >> 27 trits.  The full product
+ * needs more than 32 trits, so use a 128-bit intermediate value.
+ */
+trint32_t ternaryMULHI( trint32_t op1, trint32_t op2 )
+{
+    static const int64_t THREE_POW_27 = 7625597484987LL;
+    __int128 product = (__int128)ternary2int( op1 ) * (__int128)ternary2int( op2 );
+    __int128 high = product / THREE_POW_27;
+
+    if( high > INT64_MAX || high < INT64_MIN )
+    {
+        return 0;
+    }
+    return ternaryFromInt64( (int64_t)high );
 }
 
 //trint32_t ternaryDIVMOD  ( trint32_t op1, trint32_t op2 )

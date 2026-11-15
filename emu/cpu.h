@@ -80,8 +80,10 @@ typedef enum TriReg
     REG_P12        = 0b010100,
     REG_P13        = 0b010101,
 } TriReg;
-//#define	NUM_TRIREGS (3*3*3)
-#define	NUM_TRIREGS (0b111111)
+
+/* Register fields are three trits encoded as six bits.  Codes containing the
+ * undefined trit value (binary 10) are not valid register indices. */
+#define NUM_TRIREGS 64
 
 typedef struct TriFlags
 {
@@ -257,6 +259,30 @@ typedef enum
  * @return
  */
 extern void resetCPU(TriCpu* cpu);
+
+/**
+ * Read/write a full triword through the memory bus.
+ */
+extern TriWord ReadTriWord( TriCpu* cpu, TriWord addr );
+extern void WriteTriWord( TriCpu* cpu, TriWord addr, TriWord val );
+
+/**
+ * Read/write a single tryte through the memory bus.
+ */
+extern Tryte ReadTryte( TriCpu* cpu, TriWord addr );
+extern void WriteTryte( TriCpu* cpu, TriWord addr, Tryte val );
+
+/**
+ * Read a register with an optional three-trit modifier applied.
+ * Returns zero for the zero/invalid register.
+ */
+extern TriWord ReadModReg( TriCpu* cpu, Tryte reg, Tryte mod );
+extern void WriteReg( TriCpu* cpu, Tryte reg, TriWord val );
+
+/**
+ * Update the sign flag from a value.
+ */
+extern void SetSignTrit( TriCpu* cpu, TriWord val );
 
 /**
  * [Description]

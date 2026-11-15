@@ -46,27 +46,84 @@ Tryte ram[RAM_SIZE];
 
 /* Functions *****************************************************************/
 
+/**
+ * Convert an ASCII byte to the five-trit character encoding used by the
+ * emulator: (ascii - 0x1F), with NUL kept at zero.
+ */
+static int ascii2tryte( int c )
+{
+    if( c == 0 )
+    {
+        return 0;
+    }
+    return c - 0x1F;
+}
+
+/**
+ * Inverse of ascii2tryte().  Returns '?' for values outside the encodable
+ * range.
+ */
+static int tryte2ascii( Tryte val )
+{
+    int x = (int)ternary2int( (trint32_t)val );
+    int c;
+    if( x == 0 )
+    {
+        return 0;
+    }
+    c = x + 0x1F;
+    if( c < 0 || c > 0xFF )
+    {
+        return '?';
+    }
+    return c;
+}
+
+/**
+ * Map an address to an index in the RAM array.  Only the low eleven trits are
+ * used as an offset, mirroring the address decoder.
+ */
+static int ramIndex( TriWord addr, int64_t* index )
+{
+    int64_t offset = ternary2int( (trint32_t)( addr & RAM_ADDR_MASK ) );
+    int64_t idx = BASE_OFFSET + offset;
+    if( idx < 0 || idx >= RAM_SIZE )
+    {
+        return -1;
+    }
+    *index = idx;
+    return 0;
+}
+
 /*
  * See Header
  *
  */
 Tryte ReadAddr(TriWord addr)
 {
-    int64_t offset=ternary2int(addr & RAM_ADDR_MASK);
+    int64_t index;
     switch(addr)
     {
         case ADDR_UART:
-            // return int2Triword(getchar());
-            return 0;
-            break;
+            {
+                int c = getchar();
+                if( c == EOF )
+                {
+                    return 0;
+                }
+                return (Tryte)ascii2tryte( c );
+            }
         case ADDR_RTC2:
         case ADDR_RTC1:
         case ADDR_RTC0:
             // return int2TriWord(time(null));
             return 0;
-            break;
         default:
-            return ram[BASE_OFFSET+offset];
+            if( ramIndex( addr, &index ) != 0 )
+            {
+                return 0;
+            }
+            return ram[index];
     }
 }
 
@@ -76,18 +133,21 @@ Tryte ReadAddr(TriWord addr)
  */
 void WriteAddr(TriWord addr, Tryte val)
 {
-    int64_t offset=ternary2int(addr & RAM_ADDR_MASK);
+    int64_t index;
     switch(addr)
     {
         case ADDR_UART:
-            putchar(ternary2int(val));
+            putchar( tryte2ascii( val ) );
             break;
         case ADDR_RTC2:
         case ADDR_RTC1:
         case ADDR_RTC0:
             break;
         default:
-            ram[BASE_OFFSET+offset]=val;
+            if( ramIndex( addr, &index ) == 0 )
+            {
+                ram[index]=val;
+            }
     }
 
 }
@@ -99,7 +159,7 @@ void WriteAddr(TriWord addr, Tryte val)
  */
 void resetMem( void )
 {
-    ram[BASE_OFFSET- 4]=0b00000000;
+    memset( ram, 0, sizeof( ram ) );
 }
 
 
@@ -214,14 +274,14 @@ int readFileIntoMem(FILE* fin, const char* fname, int verbose)
                         }
                     }
                 }
-                //FALLTHRU to throw out rest of line
+                __attribute__((fallthrough));
             case '/':
                 // C++ style comments
                 while( c!=EOF && c !='\n' )
                 {
                     c=fgetc(fin);
                 }
-                //FALLTHRU to end of line processing after comment
+                __attribute__((fallthrough));
             case '\n':
                 if( accum != 0 )
                 {

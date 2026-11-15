@@ -66,8 +66,20 @@ $(DEPDIR)/%.d: %$(SRCEXT) | $(DEPDIR)
 asms: $(ASMS)
 
 
-test: $(PKG)
-	./$(PKG)
+TESTBIN=test-core
+TEST_SRCS=tests/test_core.c cpu.c mem.c disassem.c ternary.c
+
+$(TESTBIN): $(TEST_SRCS) cpu.h mem.h ternary.h disassem.h tests/test_core.c
+	@echo "Generating $@"
+	$(CC) $(CFLAGS) $(TEST_SRCS) -o $@
+
+test: $(TESTBIN)
+	./$(TESTBIN)
+
+sanitize:
+	$(CC) -g -O1 -Wall -Wextra -fsanitize=address,undefined \
+		$(TEST_SRCS) -o $(TESTBIN)-san
+	./$(TESTBIN)-san
 
 #install: $(PKG)
 #	cp $(PKG) $(PREFIX)/bin/
@@ -86,7 +98,7 @@ clean: clean-obj clean-asm
 	rm -rf *~
 
 clean-pkg: clean clean-dep
-	rm -rf $(PKG) $(GUEST) tern-test
+	rm -rf $(PKG) $(GUEST) tern-test $(TESTBIN) $(TESTBIN)-san
 
 rebuild: clean-pkg pkg
 
