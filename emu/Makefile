@@ -66,20 +66,31 @@ $(DEPDIR)/%.d: %$(SRCEXT) | $(DEPDIR)
 asms: $(ASMS)
 
 
+CORE_SRCS=cpu.c mem.c disassem.c ternary.c tml.c tml_log.c tml_policy.c sha256.c
 TESTBIN=test-core
-TEST_SRCS=tests/test_core.c cpu.c mem.c disassem.c ternary.c
+TMLTESTBIN=test-tml
+TEST_SRCS=tests/test_core.c $(CORE_SRCS)
+TML_TEST_SRCS=tests/test_tml.c $(CORE_SRCS)
 
 $(TESTBIN): $(TEST_SRCS) cpu.h mem.h ternary.h disassem.h tests/test_core.c
 	@echo "Generating $@"
 	$(CC) $(CFLAGS) $(TEST_SRCS) -o $@
 
-test: $(TESTBIN)
+$(TMLTESTBIN): $(TML_TEST_SRCS) cpu.h mem.h ternary.h tml.h tml_policy.h tests/test_tml.c
+	@echo "Generating $@"
+	$(CC) $(CFLAGS) $(TML_TEST_SRCS) -o $@
+
+test: $(TESTBIN) $(TMLTESTBIN)
 	./$(TESTBIN)
+	./$(TMLTESTBIN)
 
 sanitize:
 	$(CC) -g -O1 -Wall -Wextra -fsanitize=address,undefined \
 		$(TEST_SRCS) -o $(TESTBIN)-san
+	$(CC) -g -O1 -Wall -Wextra -fsanitize=address,undefined \
+		$(TML_TEST_SRCS) -o $(TMLTESTBIN)-san
 	./$(TESTBIN)-san
+	./$(TMLTESTBIN)-san
 
 #install: $(PKG)
 #	cp $(PKG) $(PREFIX)/bin/
@@ -98,7 +109,7 @@ clean: clean-obj clean-asm
 	rm -rf *~
 
 clean-pkg: clean clean-dep
-	rm -rf $(PKG) $(GUEST) tern-test $(TESTBIN) $(TESTBIN)-san
+	rm -rf $(PKG) $(GUEST) tern-test $(TESTBIN) $(TESTBIN)-san $(TMLTESTBIN) $(TMLTESTBIN)-san
 
 rebuild: clean-pkg pkg
 

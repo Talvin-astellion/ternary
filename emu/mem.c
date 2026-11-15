@@ -30,6 +30,7 @@
 
 /* Includes ******************************************************************/
 #include "mem.h"
+#include "tml.h"
 
 #include <stdio.h>
 #include <ctype.h>
@@ -102,6 +103,11 @@ static int ramIndex( TriWord addr, int64_t* index )
 Tryte ReadAddr(TriWord addr)
 {
     int64_t index;
+    Tryte tmlValue;
+    if( tmlReadAddr( addr, &tmlValue ) )
+    {
+        return tmlValue;
+    }
     switch(addr)
     {
         case ADDR_UART:
@@ -134,9 +140,17 @@ Tryte ReadAddr(TriWord addr)
 void WriteAddr(TriWord addr, Tryte val)
 {
     int64_t index;
+    if( tmlWriteAddr( addr, val ) )
+    {
+        return;
+    }
     switch(addr)
     {
         case ADDR_UART:
+            if( !tmlAllowActuation( tmlActive() ) )
+            {
+                break;
+            }
             putchar( tryte2ascii( val ) );
             break;
         case ADDR_RTC2:

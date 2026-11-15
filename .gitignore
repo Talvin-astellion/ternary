@@ -39,6 +39,8 @@ tern-cpu-emu
 tern-linux
 emu/test-core
 emu/test-core-san
+emu/test-tml
+emu/test-tml-san
 asm/out/
 
 # Debug files
