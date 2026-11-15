@@ -1,6 +1,7 @@
 #include "tml.h"
 #include "mem.h"
 #include "tml_policy.h"
+#include "taint.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -253,10 +254,30 @@ int tmlWriteAddr( TriWord addr, Tryte value )
     switch( addr )
     {
         case ADDR_TML_ACTION:
+        {
+            const char* detail = "action submitted";
             tml->action = value;
             tml->action_armed = 1;
-            tmlEvaluate( tml, "action submitted" );
+            tml->action_tainted = 0;
+            if( taintEnabled() &&
+                ( taintRegMask() != 0 || taintMemCount() != 0 ) )
+            {
+                tml->action_tainted = 1;
+                tml->risk += tml->policy.taint_penalty;
+                if( tml->risk > 100 )
+                {
+                    tml->risk = 100;
+                }
+                detail = "tainted action submitted";
+            }
+            tmlEvaluate( tml, detail );
+            if( tml->action_tainted && tml->policy.taint_freeze &&
+                tml->risk >= tml->policy.tau_refuse )
+            {
+                tmlFreeze( tml, "tainted action at refuse threshold" );
+            }
             return 1;
+        }
         case ADDR_TML_ARG0:
             tml->args[0] = value;
             return 1;
@@ -339,6 +360,7 @@ void tmlPrintStatus( const TmlContext* tml )
             (int64_t)tml->args[0],
             (int64_t)tml->args[1],
             (int64_t)tml->args[2] );
+    printf( "TML tainted : %s\n", tml->action_tainted ? "yes" : "no" );
     printf( "TML memory  : %lu entries, head=%s\n",
             tml->log.count,
             tml->log.head_hash[0] ? tml->log.head_hash : "-" );

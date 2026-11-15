@@ -3,6 +3,7 @@
 #include "../sha256.h"
 #include "../tml.h"
 #include "../tml_policy.h"
+#include "../taint.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -135,6 +136,37 @@ static void testTmlLifecycle( void )
     remove( path );
 }
 
+static void testTaintCoupling( void )
+{
+    TmlContext tml;
+    TmlPolicy policy;
+    char path[256];
+
+    snprintf( path, sizeof( path ), "/tmp/tml_taint_%ld.jsonl", (long)getpid() );
+    remove( path );
+    tmlPolicyDefaults( &policy );
+    policy.taint_penalty = 20;
+    policy.taint_freeze = 1;
+    snprintf( policy.log_path, sizeof( policy.log_path ), "%s", path );
+
+    CHECK( tmlInit( &tml, &policy, 1 ) == 0 );
+    CHECK( tmlBootCheck( &tml ) == 0 );
+    CHECK( taintInit() == 0 );
+    taintMarkReg( REG_P02 );
+
+    CHECK( tmlWriteAddr( ADDR_TML_RISK, ternaryFromInt64( 70 ) ) == 1 );
+    CHECK( tmlWriteAddr( ADDR_TML_ACTION, ternaryFromInt64( 9 ) ) == 1 );
+    CHECK( tml.action_tainted == 1 );
+    CHECK( tml.risk == 90 );
+    CHECK( tml.verdict == TML_REFUSE );
+    CHECK( tml.state == TML_FSM_FREEZE );
+    CHECK( tmlAllowActuation( &tml ) == 0 );
+
+    tmlShutdown( &tml );
+    taintShutdown();
+    remove( path );
+}
+
 static void testDisabled( void )
 {
     TmlContext tml;
@@ -153,6 +185,7 @@ int main( void )
     testSha256();
     testPolicy();
     testTmlLifecycle();
+    testTaintCoupling();
     testDisabled();
 
     if( failures != 0 )

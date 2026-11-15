@@ -28,6 +28,8 @@ typedef struct
     int tau_pause;
     int tau_refuse;
     int require_decision;
+    int taint_penalty;
+    int taint_freeze;
     char system_id[64];
     char log_path[TML_PATH_MAX];
 } TmlPolicy;
@@ -43,6 +45,7 @@ typedef struct
     TriWord args[3];
     int decision_valid;
     int action_armed;
+    int action_tainted;
     unsigned long freeze_count;
     TmlLog log;
 } TmlContext;

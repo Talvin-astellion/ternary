@@ -30,6 +30,8 @@ void tmlPolicyDefaults( TmlPolicy* policy )
     policy->tau_pause = 60;
     policy->tau_refuse = 85;
     policy->require_decision = 1;
+    policy->taint_penalty = 25;
+    policy->taint_freeze = 0;
     snprintf( policy->system_id, sizeof( policy->system_id ), "%s", "ternary-emu" );
     snprintf( policy->log_path, sizeof( policy->log_path ), "%s", "tml_memory.jsonl" );
 }
@@ -88,6 +90,14 @@ int tmlPolicyLoad( TmlPolicy* policy, const char* path )
         {
             policy->require_decision = atoi( value ) != 0;
         }
+        else if( strcmp( key, "taint_penalty" ) == 0 )
+        {
+            policy->taint_penalty = atoi( value );
+        }
+        else if( strcmp( key, "taint_freeze" ) == 0 )
+        {
+            policy->taint_freeze = atoi( value ) != 0;
+        }
     }
     fclose( file );
 
@@ -106,6 +116,14 @@ int tmlPolicyLoad( TmlPolicy* policy, const char* path )
     if( policy->tau_refuse > 100 )
     {
         policy->tau_refuse = 100;
+    }
+    if( policy->taint_penalty < 0 )
+    {
+        policy->taint_penalty = 0;
+    }
+    if( policy->taint_penalty > 100 )
+    {
+        policy->taint_penalty = 100;
     }
     return 0;
 }
