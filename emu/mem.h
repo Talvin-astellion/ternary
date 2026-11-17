@@ -47,6 +47,7 @@ typedef enum
 {
     //                   __--__--__--
     ADDR_UART          = 0b000000000011, // -1 ,
+    ADDR_UART_STATUS   = 0b0000000000000011000001,
     ADDR_PC_START2     = 0b000000001101, // -2 ,
     ADDR_PC_START1     = 0b000000001100, // -3 ,
     ADDR_PC_START0     = 0b000000001111, // -4 ,
@@ -96,6 +97,8 @@ typedef enum
  * @return
  */
 extern Tryte ReadAddr(TriWord addr);
+
+extern Tryte ReadRamTryte(TriWord addr);
 
 /**
  * [Description]

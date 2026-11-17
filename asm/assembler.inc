@@ -7,6 +7,8 @@
 
 #define NOP 000 000 000; 000 000 000; 000 000 000
 
+#define HALT 000----++
+
 #define R2MODFORMAT( MOD ) TOP##MOD BOT##MOD
 
 #define INST2( OPCODE, R1, R2, R2MOD, IMM ) \

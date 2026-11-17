@@ -33,8 +33,11 @@
 #include "tml.h"
 
 #include <stdio.h>
+#include <errno.h>
 #include <ctype.h>
 #include <string.h>
+#include <poll.h>
+#include <unistd.h>
 
 /* Defines *******************************************************************/
 #define MAX_STRING_SIZE 256
@@ -44,6 +47,25 @@
 /* Interfaces ****************************************************************/
 /* Data **********************************************************************/
 Tryte ram[RAM_SIZE];
+static int uart_eof = 0;
+
+static int uartReady( void )
+{
+    struct pollfd descriptor;
+    int rc;
+    if( uart_eof )
+    {
+        return 0;
+    }
+    descriptor.fd = STDIN_FILENO;
+    descriptor.events = POLLIN;
+    descriptor.revents = 0;
+    do
+    {
+        rc = poll( &descriptor, 1, 0 );
+    } while( rc < 0 && errno == EINTR );
+    return rc > 0 && ( descriptor.revents & POLLIN ) != 0;
+}
 
 /* Functions *****************************************************************/
 
@@ -111,14 +133,25 @@ Tryte ReadAddr(TriWord addr)
     switch(addr)
     {
         case ADDR_UART:
+            if( !uartReady() )
             {
-                int c = getchar();
+                return 0;
+            }
+            {
+                int c = fgetc( stdin );
                 if( c == EOF )
                 {
-                    return 0;
+                    uart_eof = 1;
+                    return N;
                 }
                 return (Tryte)ascii2tryte( c );
             }
+        case ADDR_UART_STATUS:
+            if( uart_eof )
+            {
+                return N;
+            }
+            return uartReady() ? 1 : 0;
         case ADDR_RTC2:
         case ADDR_RTC1:
         case ADDR_RTC0:
@@ -131,6 +164,16 @@ Tryte ReadAddr(TriWord addr)
             }
             return ram[index];
     }
+}
+
+Tryte ReadRamTryte(TriWord addr)
+{
+    int64_t index;
+    if( ramIndex( addr, &index ) != 0 )
+    {
+        return 0;
+    }
+    return ram[index];
 }
 
 /*

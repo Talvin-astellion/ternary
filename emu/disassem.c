@@ -57,7 +57,7 @@ static TriWord expandImmediate( TriWord input )
     {
         int shift = (ternary2int(input & 0b00111111) + 13) * 2;
         input >>= 6;
-        return (input << shift);
+        return (input << shift) & TRIWORD_MASK;
     }
 }
 
@@ -234,7 +234,7 @@ static InstructionFormat printOpcode(TriOpcode op)
         case OPCODE_ST3       : printf("ST3");       return (INSTFORMAT_2REG);
         case OPCODE_POP       : printf("POP");       return (INSTFORMAT_2REG);
         case OPCODE_PSH       : printf("PSH");       return (INSTFORMAT_2REG);
-//      case OPCODE_          : printf("        ");  return (INSTFORMAT_2REG);
+        case OPCODE_HALT      : printf("HALT");      return (INSTFORMAT_NOP);
         case OPCODE_ADC       : printf("ADC");       return (INSTFORMAT_3REG);
         case OPCODE_ADD       : printf("ADD");       return (INSTFORMAT_3REG);
         case OPCODE_ADS       : printf("ADS");       return (INSTFORMAT_3REG);

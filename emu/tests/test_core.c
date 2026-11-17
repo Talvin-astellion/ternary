@@ -80,10 +80,99 @@ static void testMemory( void )
     CHECK( ternary2int( ReadAddr( 0 ) ) == 0 );
 }
 
+static TriWord makeRegInstruction( TriOpcode opcode, TriReg r1, TriReg r2,
+                                   TriReg r3 )
+{
+    TriWord inst = opcode;
+    inst |= (TriWord)r1 << 12;
+    inst |= (TriWord)OPMOD_NOP << 18;
+    inst |= (TriWord)r2 << 26;
+    inst |= (TriWord)OPMOD_NOP << 32;
+    inst |= (TriWord)r3 << 40;
+    return inst;
+}
+
+static void testHaltAndClock( void )
+{
+    TriCpu cpu;
+    TriWord a0 = ternaryFromInt64( 0 );
+    TriWord a1 = ternaryFromInt64( 3 );
+    TriWord a2 = ternaryFromInt64( 6 );
+    resetMem();
+    resetCPU( &cpu );
+    CHECK( triwordToInt( cpu.regs[REG_CLOCK] ) == 0 );
+
+    WriteTriWord( &cpu, a0, OPCODE_NOP );
+    WriteTriWord( &cpu, a1, OPCODE_HALT );
+    WriteTriWord( &cpu, a2, OPCODE_NOP );
+    cpu.regs[REG_PC] = a0;
+    runCPU( &cpu, 5 );
+
+    CHECK( cpu.halted == 1 );
+    CHECK( cpu.trap == 0 );
+    CHECK( triwordToInt( cpu.regs[REG_CLOCK] ) == 2 );
+
+    runCPU( &cpu, 1 );
+    CHECK( triwordToInt( cpu.regs[REG_CLOCK] ) == 2 );
+
+    resetCPU( &cpu );
+    CHECK( cpu.halted == 0 );
+    CHECK( cpu.trap == 0 );
+}
+
+static void testTraps( void )
+{
+    TriCpu cpu;
+    TriWord invalidRegister;
+
+    resetMem();
+    resetCPU( &cpu );
+    WriteTriWord( &cpu, 0, 0b111111101010 );
+    cpu.regs[REG_PC] = 0;
+    runCPU( &cpu, 1 );
+    CHECK( cpu.halted == 1 );
+    CHECK( cpu.trap == TRAP_INVALID_OPCODE );
+
+    resetMem();
+    resetCPU( &cpu );
+    invalidRegister = makeRegInstruction( OPCODE_ADD, REG_P01, 0x02, REG_ZERO );
+    WriteTriWord( &cpu, 0, invalidRegister );
+    cpu.regs[REG_PC] = 0;
+    runCPU( &cpu, 1 );
+    CHECK( cpu.halted == 1 );
+    CHECK( cpu.trap == TRAP_INVALID_REGISTER );
+}
+
+static void testWordWidthAndFlags( void )
+{
+    TriCpu cpu;
+    FlagReg flags;
+    TriWord inst;
+
+    resetMem();
+    resetCPU( &cpu );
+    cpu.regs[REG_PC] = 0;
+
+    WriteReg( &cpu, REG_P02, ternaryFromInt64( -3 ) );
+    CHECK( triwordToInt( cpu.regs[REG_P02] ) == -3 );
+
+    inst = makeRegInstruction( OPCODE_ADD, REG_P01, REG_ZERO, REG_P02 );
+    WriteTriWord( &cpu, 0, inst );
+    runCPU( &cpu, 1 );
+
+    CHECK( triwordToInt( cpu.regs[REG_P01] ) == -3 );
+    CHECK( triwordToInt( cpu.regs[REG_CLOCK] ) == 1 );
+    flags.val = cpu.regs[REG_FLAGS];
+    CHECK( flags.flags.S == N );
+    CHECK( flags.flags.C == 0 );
+    CHECK( flags.flags.V == 0 );
+    CHECK( flags.flags.P == N );
+}
+
 static void testAddCarry( void )
 {
     TriCpu cpu;
-    TriWord maxv = ternaryFromInt64( 926510094425920LL );
+    TriWord maxv = ternaryFromInt64( 3812798742493LL );
     TriWord inst;
     FlagReg flags;
 
@@ -106,8 +195,9 @@ static void testAddCarry( void )
 
     flags.val = cpu.regs[REG_FLAGS];
     CHECK( flags.flags.C == 1 );
+    CHECK( flags.flags.V == 1 );
     CHECK( flags.flags.S == N );
-    CHECK( ternary2int( cpu.regs[REG_P01] ) == -1 );
+    CHECK( triwordToInt( cpu.regs[REG_P01] ) == -1 );
 }
 
 int main( void )
@@ -118,6 +208,9 @@ int main( void )
     testRotatePair();
     testRegisterValidation();
     testMemory();
+    testHaltAndClock();
+    testTraps();
+    testWordWidthAndFlags();
     testAddCarry();
 
     if( failures != 0 )

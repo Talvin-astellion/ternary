@@ -27,7 +27,7 @@ THREE_REG = [
 CASES = [(name, name, "P01, P02, _NOP, 0") for name in TWO_REG]
 CASES += [(name, name, "P01, P02, _NOP, P03, _NOP") for name in THREE_REG]
 CASES += [("ADSI", "ADSI", "P01, 0, 0")]
-CASES += [("NOP", "NOP", None)]
+CASES += [("NOP", "NOP", None), ("HALT", "HALT", None)]
 CASES += [
     ("MV", "ADDI", "P01, P02"),
     ("MVI", "ADDI", "P01, 0"),
@@ -78,9 +78,9 @@ def instruction_trytes(preprocessed):
         if line.startswith("#") or ";" not in line:
             continue
         parts = [part.strip() for part in line.split(";") if part.strip()]
-        if len(parts) != 3:
+        if len(parts) not in (1, 3):
             raise AssertionError(
-                "expected 3 trytes per instruction, got %d: %r"
+                "expected 1 or 3 trytes per instruction, got %d: %r"
                 % (len(parts), line)
             )
         instructions.append("".join(parts[0].split()))

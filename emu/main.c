@@ -108,7 +108,7 @@ static void printHelp( void )
     printf(" c : Reset CPU\n");
     printf(" m : Reset Memory\n");
     printf(" f <FILE> : Read file into memory\n");
-    printf(" g [N] : Run N instructions (default 100000)\n");
+    printf(" g [N] : Run N instructions (default 100000), stop on HALT/trap\n");
     printf(" t : Print TML status\n");
     printf(" l : Print the tail of the TML Always Memory log\n");
     printf(" o +|-|0 : Human oversight override\n");
@@ -142,7 +142,7 @@ int main( int argc, char** argv )
     const char* symbolicPath = NULL;
     int tmlEnabled = 0;
     int taintOn = 0;
-    int i;
+    long i;
 
     memset( &tml, 0, sizeof( tml ) );
     for( i = 1; i < argc; ++i )
@@ -285,8 +285,15 @@ int main( int argc, char** argv )
             }
             else
             {
-                runCPU(&cpu, 1);
-                printCpuState(&cpu);
+                if( cpu.halted )
+                {
+                    printf("CPU halted (press c to reset)\n");
+                }
+                else
+                {
+                    runCPU(&cpu, 1);
+                    printCpuState(&cpu);
+                }
             }
         }
         else if( 0 == strcmp( cmd, "q" ) )
@@ -311,7 +318,7 @@ int main( int argc, char** argv )
                 }
                 steps = (long)ternary2int( n );
             }
-            for( i = 0; i < steps && !tmlHalted( &tml ); ++i )
+            for( i = 0; i < steps && !tmlHalted( &tml ) && !cpu.halted; ++i )
             {
                 runCPU(&cpu, 1);
             }
@@ -442,8 +449,15 @@ int main( int argc, char** argv )
             }
             else
             {
-                runCPU(&cpu, 1);
-                printCpuState(&cpu);
+                if( cpu.halted )
+                {
+                    printf("CPU halted (press c to reset)\n");
+                }
+                else
+                {
+                    runCPU(&cpu, 1);
+                    printCpuState(&cpu);
+                }
             }
         }
 

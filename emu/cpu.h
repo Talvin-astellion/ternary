@@ -46,6 +46,9 @@
 #define PRITRIWORD PRIx64
 #define SCNTRIWORD SCNi64
 
+#define TRAP_INVALID_OPCODE    1
+#define TRAP_INVALID_REGISTER  2
+
 /* Types *********************************************************************/
 typedef trint32_t TriWord;
 typedef trint16_t Tryte;
@@ -103,13 +106,9 @@ typedef union FlagReg
 
 typedef struct TriCpu
 {
-//	TriWord A;
-//	TriWord B;
-//	TriWord D;
-//	TriWord valA;
-//	TriWord valB;
     TriWord regs[NUM_TRIREGS];
-//	uint8_t running;
+    int halted;
+    int trap;
 } TriCpu;
 
 
@@ -124,7 +123,7 @@ typedef enum TriOpcode
     OPCODE_ST3       = 0b111111110001,  // Store (Rs1+immediate) <- Rs2 27 trits
     OPCODE_POP       = 0b111111110111,  // Load Rd <- (Rs) ; Rs += immediate
     OPCODE_PSH       = 0b111111110100,  // Store Rd += immediate; (Rd)  <- Rs
-//  OPCODE_          = 0b111111110101,  //
+    OPCODE_HALT      = 0b111111110101,
     //                   __--__--__--
     OPCODE_ADC       = 0b111111001111,  // C:Rd = Rs1 + Rs2 + C
     OPCODE_ADD       = 0b111111001100,  // C:Rd = Rs1 + Rs2
@@ -291,6 +290,8 @@ extern void SetSignTrit( TriCpu* cpu, TriWord val );
  * @return
  */
 extern void printCpuState(TriCpu* cpu);
+
+extern int64_t triwordToInt( TriWord val );
 
 /**
  * [Description]

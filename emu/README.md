@@ -47,6 +47,11 @@ requires `doxygen`; plain `make` does not.
 | `--taint` | Enable taint tracking |
 | `--symbolic FILE` | Write conditional constraints as JSONL |
 
+`HALT` stops the CPU until `c` resets it.  Invalid opcodes and malformed
+register fields latch a trap and stop the CPU instead of executing as NOPs.
+`REG_CLOCK` counts executed instructions; the flags register tracks sign,
+carry, overflow and trit parity.
+
 Interactive commands:
 
 | Command | Action |
@@ -88,6 +93,7 @@ The TML registers are memory-mapped at negative ternary addresses:
 
 | Address | Name | Access | Meaning |
 | --- | --- | --- | --- |
+| `-26` | `ADDR_UART_STATUS` | read | +1 input ready, 0 empty, -1 EOF |
 | `-17` | `ADDR_TML_STATUS` | read | FSM state: 0 BOOT, 1 ACTIVE, 2 SACRED_PAUSE, 3 FREEZE, 4 RECOVERY |
 | `-18` | `ADDR_TML_ACTION` | read/write | Writing submits an action id and evaluates it |
 | `-19` | `ADDR_TML_ARG0` | read/write | Action argument 0 |
@@ -98,7 +104,9 @@ The TML registers are memory-mapped at negative ternary addresses:
 | `-24` | `ADDR_TML_LOG_HEAD` | read | Tryte derived from the current log head |
 | `-25` | `ADDR_TML_UNFREEZE` | write | Unfreeze token (4242) |
 
-The symbolic constants are defined in `mem.h`.
+The symbolic constants are defined in `mem.h`.  UART reads are non-blocking:
+reading `ADDR_UART` returns 0 when no character is ready, so programs should
+poll `ADDR_UART_STATUS` first.
 
 ### Policy file
 
