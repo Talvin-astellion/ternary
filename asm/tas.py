@@ -24,6 +24,7 @@ TRIT_VALUE = {
 }
 IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 EQU_RE = re.compile(r"^\s*\.equ\s+([A-Za-z_][A-Za-z0-9_]*)\s*,\s*(.*?)\s*$")
+LOCAL_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*"([^"]+)"')
 DATA_DIRECTIVE_RE = re.compile(r"^\.(tryte|triword|string)\b")
 MAX_IMMEDIATE = (3 ** 8 - 1) // 2
 TRITS_PER_TRYTE = 9
@@ -33,10 +34,12 @@ MAX_TRYTE = (3 ** TRITS_PER_TRYTE - 1) // 2
 
 LABEL_PREFIX = "__tas_label_"
 BRANCH_PREFIX = "__tas_branch_"
+CALL_PREFIX = "__tas_call_"
 EXPR_PREFIX = "__tas_expr_"
 DATA_PREFIX = "__tas_data_"
 TRIWORD_DATA_PREFIX = "__tas_triword_"
 UNRESOLVED_BRANCH_PREFIX = "__tas_ubranch_"
+UNRESOLVED_CALL_PREFIX = "__tas_ucall_"
 UNRESOLVED_EXPR_PREFIX = "__tas_uexpr_"
 UNRESOLVED_DATA_PREFIX = "__tas_udata_"
 UNRESOLVED_TRIWORD_PREFIX = "__tas_utriword_"
@@ -113,6 +116,35 @@ def find_matching(text, open_pos, opening, closing):
             if depth == 0:
                 return pos
     return -1
+
+
+def expand_local_includes(text, path, include_dirs, seen=None):
+    seen = set() if seen is None else seen
+    root = os.path.dirname(os.path.abspath(path))
+    out = []
+    for line in text.splitlines(keepends=True):
+        match = LOCAL_INCLUDE_RE.match(line)
+        if not match or not match.group(1).endswith(".tas"):
+            out.append(line)
+            continue
+        name = match.group(1)
+        candidates = [os.path.join(root, name)]
+        candidates.extend(os.path.join(directory, name)
+                          for directory in list(include_dirs) + [ASMDIR])
+        included = next((candidate for candidate in candidates
+                         if os.path.isfile(candidate)), None)
+        if included is None or os.path.abspath(included) in seen:
+            out.append(line)
+            continue
+        absolute = os.path.abspath(included)
+        try:
+            with open(absolute, "r", encoding="utf-8") as handle:
+                included_text = handle.read()
+        except OSError as error:
+            raise AsmError(path, 0, str(error))
+        out.append(expand_local_includes(
+            included_text, absolute, include_dirs, seen | {absolute}))
+    return "".join(out)
 
 
 def decode_string_literal(raw, path, line):
@@ -350,6 +382,21 @@ def prepare_source(text, path):
                             "branch", start, out_len, line, label, index))
                         i = close + 1
                         continue
+                if name == "CALL":
+                    if after < len(text) and text[after] == "(":
+                        close = find_matching(text, after, "(", ")")
+                        if close < 0:
+                            raise AsmError(path, line, "unclosed CALL(")
+                        label = text[after + 1:close].strip()
+                        if not IDENT_RE.fullmatch(label):
+                            raise AsmError(path, line, "CALL target must be a label")
+                        index = len(occurrences)
+                        start = out_len
+                        append("%s%d__" % (CALL_PREFIX, index))
+                        occurrences.append(Occurrence(
+                            "call", start, out_len, line, label, index))
+                        i = close + 1
+                        continue
                 append(name)
                 i = end
                 continue
@@ -409,10 +456,11 @@ def format_tryte_value(value, path, line):
 
 def int_to_trytes(value, path, line):
     trytes = []
+    base = 3 ** TRITS_PER_TRYTE
     for _ in range(TRYTES_PER_TRIWORD):
-        value, remainder = divmod(value, 3)
-        if remainder == 2:
-            remainder = -1
+        value, remainder = divmod(value, base)
+        if remainder > MAX_TRYTE:
+            remainder -= base
             value += 1
         trytes.append(format_tryte_value(remainder, path, line))
     if value != 0:
@@ -459,6 +507,18 @@ def render(model, mode, expr_values=None, branch_offsets=None):
                         value, model.path, occurrence.line))
                 else:
                     parts.append(int_to_balanced(value))
+        elif occurrence.kind == "call":
+            if mode == 1:
+                parts.append("%s%d__" % (CALL_PREFIX, occurrence.index) + ";0" * 8)
+            else:
+                offset = branch_offsets.get(occurrence.index) if branch_offsets else None
+                if offset is None:
+                    parts.append("%s%d__" % (UNRESOLVED_CALL_PREFIX, occurrence.index))
+                else:
+                    parts.append(
+                        "ADDI( P12, PC, _NOP, 1n0 ); "
+                        "PSH( SP, P12, _NOP, 10 ); "
+                        "ADDI( PC, PC, _NOP, %s )" % int_to_balanced(offset))
         else:
             if mode == 1:
                 parts.append("%s%d__;0;0" % (BRANCH_PREFIX, occurrence.index))
@@ -500,6 +560,7 @@ def run_preprocessor(source, pp, include_dirs, includes, defines, path):
 def parse_preprocessed(text, model, path):
     label_address = {}
     branch_address = {}
+    call_address = {}
     address = 0
     current_file = path
     current_line = 0
@@ -544,9 +605,14 @@ def parse_preprocessed(text, model, path):
                 if match:
                     index = int(match.group(1))
                     branch_address[index] = address
-                elif not is_trit_token(token):
-                    raise AsmError(current_file, current_line,
-                                   "invalid tryte '%s'" % token)
+                else:
+                    match = re.fullmatch(re.escape(CALL_PREFIX) + r"(\d+)__", token)
+                    if match:
+                        index = int(match.group(1))
+                        call_address[index] = address
+                    elif not is_trit_token(token):
+                        raise AsmError(current_file, current_line,
+                                       "invalid tryte '%s'" % token)
                 address += 1
                 continue
             accum += char
@@ -555,7 +621,7 @@ def parse_preprocessed(text, model, path):
             raise AsmError(current_file, current_line,
                            "unexpected text '%s'" % accum.strip())
 
-    return label_address, branch_address
+    return label_address, branch_address, call_address
 
 
 def trunc_div(left, right, path, line):
@@ -739,8 +805,9 @@ def finalize_output(text, model, path, expr_errors=None):
     text = re.sub(re.escape(LABEL_PREFIX) + r"\d+\s*:", "", text)
 
     unresolved = re.search(
-        r"(%s|%s|%s|%s)(\d+)__" % (
+        r"(%s|%s|%s|%s|%s)(\d+)__" % (
             re.escape(UNRESOLVED_BRANCH_PREFIX),
+            re.escape(UNRESOLVED_CALL_PREFIX),
             re.escape(UNRESOLVED_EXPR_PREFIX),
             re.escape(UNRESOLVED_DATA_PREFIX),
             re.escape(UNRESOLVED_TRIWORD_PREFIX)), text)
@@ -751,6 +818,9 @@ def finalize_output(text, model, path, expr_errors=None):
         if prefix == UNRESOLVED_BRANCH_PREFIX:
             raise AsmError(path, occurrence.line,
                            "undefined branch target '%s'" % occurrence.data)
+        if prefix == UNRESOLVED_CALL_PREFIX:
+            raise AsmError(path, occurrence.line,
+                           "undefined call target '%s'" % occurrence.data)
         if prefix == UNRESOLVED_EXPR_PREFIX:
             message = "undefined expression in '@(%s)'" % occurrence.data
         else:
@@ -761,7 +831,7 @@ def finalize_output(text, model, path, expr_errors=None):
         raise AsmError(path, occurrence.line, message)
 
     if re.search(
-            r"__tas_(label|branch|expr|data|triword|ubranch|uexpr|udata|utriword)_",
+            r"__tas_(label|branch|call|expr|data|triword|ubranch|ucall|uexpr|udata|utriword)_",
             text):
         raise AsmError(path, 0, "unresolved assembler placeholder")
 
@@ -826,25 +896,33 @@ def assemble(path, output, pp, include_dirs, includes, defines):
     except OSError as error:
         raise AsmError(path, 0, str(error))
 
+    source = expand_local_includes(source, path, include_dirs)
     model = prepare_source(source, path)
     pass1_source = render(model, 1)
     pass1_text = run_preprocessor(
         pass1_source, pp, include_dirs, includes, defines, path)
-    label_address, branch_address = parse_preprocessed(pass1_text, model, path)
+    label_address, branch_address, call_address = parse_preprocessed(
+        pass1_text, model, path)
 
     expr_values, expr_errors = evaluate_expressions(model, label_address, path)
 
     branch_offsets = {}
     for occurrence in model.occurrences:
-        if occurrence.kind != "branch":
-            continue
         target = occurrence.data
-        if target not in label_address or occurrence.index not in branch_address:
+        if occurrence.kind == "branch":
+            if target not in label_address or occurrence.index not in branch_address:
+                continue
+            offset = label_address[target] - (branch_address[occurrence.index] + 3)
+            message = "branch offset does not fit in an immediate"
+        elif occurrence.kind == "call":
+            if target not in label_address or occurrence.index not in call_address:
+                continue
+            offset = label_address[target] - (call_address[occurrence.index] + 9)
+            message = "call offset does not fit in an immediate"
+        else:
             continue
-        offset = label_address[target] - (branch_address[occurrence.index] + 3)
         if abs(offset) > MAX_IMMEDIATE:
-            raise AsmError(path, occurrence.line,
-                           "branch offset does not fit in an immediate")
+            raise AsmError(path, occurrence.line, message)
         branch_offsets[occurrence.index] = offset
 
     pass2_source = render(model, 2, expr_values, branch_offsets)

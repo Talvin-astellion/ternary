@@ -9,6 +9,10 @@
 
 #define HALT 000----++
 
+#define RET POP( PC, SP, _NOP, n0 )
+
+#define IO_INIT ADDI( SP, ZERO, _NOP, 1000000 );
+
 #define R2MODFORMAT( MOD ) TOP##MOD BOT##MOD
 
 #define INST2( OPCODE, R1, R2, R2MOD, IMM ) \
@@ -51,6 +55,7 @@
 #define CLOCK  N03
 #define FLAGS  N02
 #define PC     N01
+#define SP     P13
 
 #define TOP_NEG 0-
 #define TOP_INC 0-

@@ -12,6 +12,7 @@ ASMDIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO = os.path.dirname(ASMDIR)
 EMU = os.path.join(REPO, "emu", "tern-cpu-emu")
 CPU_H = os.path.join(REPO, "emu", "cpu.h")
+SERIAL_LOAD = os.path.join(ASMDIR, "serial_load.py")
 OUTDIR = os.path.join(ASMDIR, "out")
 
 TWO_REG = [
@@ -129,20 +130,23 @@ def test_encodings():
         raise AssertionError("\n".join(failures))
 
 
-def run_emulator(program, commands):
+def run_emulator_bytes(program, data):
     result = subprocess.run(
         [EMU, program],
-        input=commands,
-        text=True,
+        input=data,
         capture_output=True,
         timeout=20,
     )
-    output = result.stdout + result.stderr
+    output = (result.stdout + result.stderr).decode("utf-8", "replace")
     if result.returncode != 0:
         raise AssertionError("%s exited %d\n%s" % (program, result.returncode, output))
     if "ERROR" in output or "Unexpected" in output:
         raise AssertionError("%s reported a load/run error\n%s" % (program, output))
     return output
+
+
+def run_emulator(program, commands):
+    return run_emulator_bytes(program, commands.encode("utf-8"))
 
 
 def assemble_source(source):
@@ -256,6 +260,8 @@ def test_examples():
         if name.endswith(".tas")
     )
     for name in examples:
+        if name == "loader":
+            continue
         program = os.path.join(OUTDIR, name + ".trt")
         if not os.path.exists(program):
             raise AssertionError("missing assembled program %s" % program)
@@ -298,6 +304,30 @@ def test_hello():
         raise AssertionError("hello output not found\n%s" % output)
     if "CPU halted" not in output:
         raise AssertionError("hello program did not halt cleanly\n%s" % output)
+
+
+def test_serial_loader():
+    hello = os.path.join(OUTDIR, "hello.trt")
+    loader = os.path.join(OUTDIR, "loader.trt")
+    for program in (hello, loader):
+        if not os.path.exists(program):
+            raise AssertionError("missing assembled program %s" % program)
+
+    payload = subprocess.run(
+        [sys.executable, SERIAL_LOAD, hello],
+        capture_output=True,
+        timeout=20,
+    )
+    if payload.returncode != 0:
+        raise AssertionError(
+            "serial_load.py failed\n%s"
+            % (payload.stdout + payload.stderr).decode("utf-8", "replace")
+        )
+    output = run_emulator_bytes(loader, b"g\n" + payload.stdout)
+    if "Hello, ternary!\n" not in output:
+        raise AssertionError("serial loader hello output not found\n%s" % output)
+    if "CPU halted" not in output:
+        raise AssertionError("serial loader program did not halt cleanly\n%s" % output)
 
 
 def expect_tas_error(source, expected):
@@ -366,6 +396,7 @@ def main():
     test_data_directives()
     test_examples()
     test_hello()
+    test_serial_loader()
     test_tas_errors()
     print("assembler encoding and emulator smoke tests passed")
     return 0

@@ -11,6 +11,7 @@ EMUEXE=tern-cpu-emu
 EMU=$(EMUDIR)$(EMUEXE)
 EMUDEPS=$(wildcard $(EMUDIR)*.c) $(wildcard $(EMUDIR)*.h)
 TASFILES=$(wildcard $(SRCDIR)/*.tas)
+LIBFILES=$(wildcard lib/*.tas)
 TRTFILES=$(TASFILES:$(SRCDIR)/%.tas=$(OUTDIR)/%.trt)
 
 default: test
@@ -19,7 +20,7 @@ $(OUTDIR):
 	$(MKDIR) $(OUTDIR)
 
 # Rule to assemble Ternary Assembly into loadable Trit files
-$(OUTDIR)/%.trt: $(SRCDIR)/%.tas tas.py assembler.inc aliases.ymp | $(OUTDIR)
+$(OUTDIR)/%.trt: $(SRCDIR)/%.tas tas.py assembler.inc aliases.ymp $(LIBFILES) | $(OUTDIR)
 	$(TAS) $(TASFLAGS) $< -o $@
 
 # Rule to run a Trit file in the emulator

@@ -64,7 +64,7 @@ static int uartReady( void )
     {
         rc = poll( &descriptor, 1, 0 );
     } while( rc < 0 && errno == EINTR );
-    return rc > 0 && ( descriptor.revents & POLLIN ) != 0;
+    return rc > 0 && ( descriptor.revents & ( POLLIN | POLLHUP | POLLERR ) ) != 0;
 }
 
 /* Functions *****************************************************************/
@@ -79,7 +79,7 @@ static int ascii2tryte( int c )
     {
         return 0;
     }
-    return c - 0x1F;
+    return (Tryte)ternaryFromInt64( c - 0x1F );
 }
 
 /**

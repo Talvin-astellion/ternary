@@ -4,18 +4,22 @@ Assembly
 ## Files
 | Files      | Description                                                    |
 -------------|----------------------------------------------------------------|
-|tas.py      | Assembler driver for labels, `.equ`, `@(expr)`, data directives and `BRANCH()` |
+|tas.py      | Assembler driver for labels, `.equ`, `@(expr)`, data directives, `BRANCH()` and `CALL()` |
 |yamp.py     | Experimental standalone macro preprocessor                     |
 |assembler.inc | Instruction macros, registers, modifiers and immediate encoding |
 |aliases.ymp | Optional pseudo-instructions such as `MV`, `JMP` and `SWP`     |
+|lib/        | Reusable `.tas` include files such as `io.tas`                 |
 |examples/   | Example `.tas` programs assembled into `out/*.trt`             |
+|serial_load.py | Serializer for streaming a `.trt` image into the loader     |
 |tests/      | Encoding and emulator smoke tests                              |
 
 The Makefile runs `tas.py`, which invokes the system C preprocessor
 (`gcc -E -xc`) and automatically includes `assembler.inc` and `aliases.ymp`.
-`tas.py` adds symbolic labels, `.equ` constants, `@(expr)` operands and
-`BRANCH(label)` fixups on top of the macro layer.  `yamp.py` is a partial
-standalone preprocessor replacement and is not used by the default build.
+`tas.py` adds symbolic labels, `.equ` constants, `@(expr)` operands,
+`BRANCH(label)` fixups and `CALL(label)` fixups on top of the macro layer.
+`#include "lib/io.tas"` is resolved recursively before the C preprocessor runs.
+`yamp.py` is a partial standalone preprocessor replacement and is not used by
+the default build.
 
 ## Build and test
 
@@ -57,6 +61,8 @@ ADDI( P03, ZERO, _NOP, @(done - start));
 - `@(expr)` substitutes the value as a balanced ternary immediate.
 - `BRANCH(label)` emits an unconditional relative branch.  The target must fit
   in the eight-trit ADDI immediate.
+- `CALL(label)` pushes the return address on the stack and jumps to `label`.
+  Use `RET` to return; `IO_INIT` sets the stack pointer.
 
 ## Data
 
@@ -74,6 +80,38 @@ message:
 `.string` uses the emulator's character encoding (`ascii - 0x1f`, with NUL kept
 at zero).  `asm/examples/hello.tas` shows a complete program that prints the
 string through `ADDR_UART` and then halts.
+
+## I/O library
+
+`asm/lib/io.tas` provides small UART routines:
+
+| Routine | Arguments / result |
+| --- | --- |
+| `IO_INIT` | Initializes the stack pointer; call once before using `CALL`/`RET` |
+| `IO_PUTC` | `P01` = character tryte to write |
+| `IO_PUTS` | `P01` = address of a zero-terminated string; leaves `P01` at the terminator |
+| `IO_GETC` | Returns a character in `P01` and status in `P02` (+1 ready, 0 empty, -1 EOF) |
+| `IO_READ_TRYTE` | Reads nine UART trit bytes and returns one tryte in `P01` |
+
+Include it with `#include "lib/io.tas"` and call routines with `CALL(label)`.
+
+## Serial loader
+
+`asm/examples/loader.tas` receives a serialized image over `ADDR_UART`, stores
+it in RAM and jumps to the image start address.  `asm/serial_load.py` emits the
+stream from a `.trt` image:
+
+```sh
+python3 asm/serial_load.py asm/out/hello.trt -o /tmp/hello.bin
+printf 'g\n' > /tmp/loader-input
+cat /tmp/hello.bin >> /tmp/loader-input
+./emu/tern-cpu-emu asm/out/loader.trt < /tmp/loader-input
+```
+
+The first three trytes are the start address, the next three are the load base
+address, and the remaining trytes are stored consecutively from that base.  Each
+tryte is sent as nine bytes in the range `0x1e..0x20` (`-1/0/+1` trits).  EOF on
+stdin terminates loading and transfers control to the loaded image.
 
 Direct invocation is also supported:
 

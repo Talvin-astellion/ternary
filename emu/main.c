@@ -144,6 +144,7 @@ int main( int argc, char** argv )
     int taintOn = 0;
     long i;
 
+    setvbuf( stdin, NULL, _IONBF, 0 );
     memset( &tml, 0, sizeof( tml ) );
     for( i = 1; i < argc; ++i )
     {

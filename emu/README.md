@@ -104,9 +104,11 @@ The TML registers are memory-mapped at negative ternary addresses:
 | `-24` | `ADDR_TML_LOG_HEAD` | read | Tryte derived from the current log head |
 | `-25` | `ADDR_TML_UNFREEZE` | write | Unfreeze token (4242) |
 
-The symbolic constants are defined in `mem.h`.  UART reads are non-blocking:
-reading `ADDR_UART` returns 0 when no character is ready, so programs should
-poll `ADDR_UART_STATUS` first.
+The symbolic constants are defined in `mem.h`.  Standard input supplies UART
+input to programs, and `ADDR_UART_STATUS` reports when a byte is ready, empty or
+EOF.  A read from `ADDR_UART` returns 0 when no character is ready, so programs
+should poll `ADDR_UART_STATUS` first.  The monitor uses the same input stream,
+so serialized input should follow a run command such as `g\n`.
 
 ### Policy file
 
