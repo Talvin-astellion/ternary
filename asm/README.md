@@ -4,7 +4,7 @@ Assembly
 ## Files
 | Files      | Description                                                    |
 -------------|----------------------------------------------------------------|
-|tas.py      | Assembler driver for labels, `.equ`, `@(expr)` and `BRANCH()`  |
+|tas.py      | Assembler driver for labels, `.equ`, `@(expr)`, data directives and `BRANCH()` |
 |yamp.py     | Experimental standalone macro preprocessor                     |
 |assembler.inc | Instruction macros, registers, modifiers and immediate encoding |
 |aliases.ymp | Optional pseudo-instructions such as `MV`, `JMP` and `SWP`     |
@@ -57,6 +57,23 @@ ADDI( P03, ZERO, _NOP, @(done - start));
 - `@(expr)` substitutes the value as a balanced ternary immediate.
 - `BRANCH(label)` emits an unconditional relative branch.  The target must fit
   in the eight-trit ADDI immediate.
+
+## Data
+
+Data directives emit trytes at the current address and work with the same
+expressions and labels as `@(expr)`.
+
+```asm
+message:
+.string "Hello, ternary!\n"  // characters plus a terminating zero
+.tryte COUNT                 // one tryte
+.triword 0                   // three zero trytes
+.triword 1, 1, 1             // explicit low, middle and high trytes
+```
+
+`.string` uses the emulator's character encoding (`ascii - 0x1f`, with NUL kept
+at zero).  `asm/examples/hello.tas` shows a complete program that prints the
+string through `ADDR_UART` and then halts.
 
 Direct invocation is also supported:
 

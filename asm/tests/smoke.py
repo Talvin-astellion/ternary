@@ -157,6 +157,33 @@ def assemble_source(source):
     return tmpdir, out
 
 
+def assemble_with_tas(source):
+    tmpdir = tempfile.mkdtemp(prefix="tern-tas-data-")
+    src = os.path.join(tmpdir, "data.tas")
+    out = os.path.join(tmpdir, "data.trt")
+    try:
+        with open(src, "w", encoding="utf-8") as handle:
+            handle.write(source + "\n")
+        result = subprocess.run(
+            [
+                sys.executable, os.path.join(ASMDIR, "tas.py"),
+                "--include", "assembler.inc",
+                "--include", "aliases.ymp",
+                src, "-o", out,
+            ],
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        output = result.stdout + result.stderr
+        if result.returncode != 0:
+            raise AssertionError("tas.py failed\n%s" % output)
+        with open(out, "r", encoding="utf-8") as handle:
+            return handle.read()
+    finally:
+        shutil.rmtree(tmpdir)
+
+
 def test_runtime_macros():
     source = """--: 10-;
 10-:
@@ -199,6 +226,30 @@ def register_values(output, register):
     return [int(value) for value in re.findall(pattern, output)]
 
 
+def test_data_directives():
+    text = assemble_with_tas(""".equ A, 1
+.tryte A
+.tryte n
+.triword 0
+.triword 1, 1, 1
+.string "A\\n"
+""")
+    trytes = []
+    for line in text.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        trytes.extend(token for token in line.replace(";", " ").split() if token)
+    expected = [
+        "000000001", "00000000n",
+        "000000000", "000000000", "000000000",
+        "000000001", "000000001", "000000001",
+        "0000011n1", "00000n1n0", "000000000",
+    ]
+    if trytes != expected:
+        raise AssertionError("data directive trytes %r, expected %r" %
+                             (trytes, expected))
+
+
 def test_examples():
     examples = sorted(
         name[:-4] for name in os.listdir(os.path.join(ASMDIR, "examples"))
@@ -236,6 +287,17 @@ def test_examples():
         raise AssertionError(
             "labels result %r, expected %r" % (actual, expected)
         )
+
+
+def test_hello():
+    program = os.path.join(OUTDIR, "hello.trt")
+    if not os.path.exists(program):
+        raise AssertionError("missing assembled program %s" % program)
+    output = run_emulator(program, "g\nq\n")
+    if "Hello, ternary!\n" not in output:
+        raise AssertionError("hello output not found\n%s" % output)
+    if "CPU halted" not in output:
+        raise AssertionError("hello program did not halt cleanly\n%s" % output)
 
 
 def expect_tas_error(source, expected):
@@ -301,7 +363,9 @@ ADDI( PC, PC, _NOP, 0);
 def main():
     test_encodings()
     test_runtime_macros()
+    test_data_directives()
     test_examples()
+    test_hello()
     test_tas_errors()
     print("assembler encoding and emulator smoke tests passed")
     return 0

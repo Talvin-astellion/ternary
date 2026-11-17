@@ -1,0 +1,16 @@
+--: @(start);
+10-:
+start:
+ADDI( P01, ZERO, _NOP, @(message) );
+ADDI( P05, ZERO, _NOP, @(output - check - 10) );
+loop:
+LD1( P02, P01, _NOP, 0 );
+check:
+ADS( PC, P05, _NOP, P05, _NOP );
+HALT;
+output:
+ST1( ZERO, P02, _NOP, n );
+ADDI( P01, P01, _NOP, 1 );
+BRANCH(loop);
+message:
+.string "Hello, ternary!\n"

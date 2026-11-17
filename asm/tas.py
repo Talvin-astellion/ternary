@@ -24,13 +24,22 @@ TRIT_VALUE = {
 }
 IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 EQU_RE = re.compile(r"^\s*\.equ\s+([A-Za-z_][A-Za-z0-9_]*)\s*,\s*(.*?)\s*$")
+DATA_DIRECTIVE_RE = re.compile(r"^\.(tryte|triword|string)\b")
 MAX_IMMEDIATE = (3 ** 8 - 1) // 2
+TRITS_PER_TRYTE = 9
+TRYTES_PER_TRIWORD = 3
+MIN_TRYTE = -(3 ** TRITS_PER_TRYTE - 1) // 2
+MAX_TRYTE = (3 ** TRITS_PER_TRYTE - 1) // 2
 
 LABEL_PREFIX = "__tas_label_"
 BRANCH_PREFIX = "__tas_branch_"
 EXPR_PREFIX = "__tas_expr_"
+DATA_PREFIX = "__tas_data_"
+TRIWORD_DATA_PREFIX = "__tas_triword_"
 UNRESOLVED_BRANCH_PREFIX = "__tas_ubranch_"
 UNRESOLVED_EXPR_PREFIX = "__tas_uexpr_"
+UNRESOLVED_DATA_PREFIX = "__tas_udata_"
+UNRESOLVED_TRIWORD_PREFIX = "__tas_utriword_"
 
 
 class AsmError(Exception):
@@ -68,6 +77,7 @@ class SourceModel:
     label_lines: list
     constants: dict
     constant_lines: dict
+    path: str
 
 
 def strip_comments(text):
@@ -105,6 +115,55 @@ def find_matching(text, open_pos, opening, closing):
     return -1
 
 
+def decode_string_literal(raw, path, line):
+    text = raw.strip()
+    if not text.startswith('"'):
+        raise AsmError(path, line, "expected a quoted string")
+    escapes = {"n": 10, "r": 13, "t": 9, "0": 0, "\\": 92, '"': 34}
+    values = []
+    i = 1
+    closed = False
+    while i < len(text):
+        char = text[i]
+        if char == '"':
+            closed = True
+            i += 1
+            break
+        if char == "\\":
+            i += 1
+            if i >= len(text):
+                raise AsmError(path, line, "unterminated escape sequence")
+            escape = text[i]
+            if escape in escapes:
+                values.append(escapes[escape])
+                i += 1
+            elif escape in "01234567":
+                start = i
+                while i < len(text) and i - start < 3 and text[i] in "01234567":
+                    i += 1
+                values.append(int(text[start:i], 8))
+            elif escape == "x":
+                i += 1
+                start = i
+                while i < len(text) and i - start < 2 and text[i] in "0123456789abcdefABCDEF":
+                    i += 1
+                if start == i:
+                    raise AsmError(path, line, "empty hexadecimal escape")
+                values.append(int(text[start:i], 16))
+            else:
+                raise AsmError(path, line, "unknown escape '\\%s'" % escape)
+            continue
+        values.append(ord(char))
+        i += 1
+    if not closed:
+        raise AsmError(path, line, "unterminated string literal")
+    rest = text[i:].strip()
+    if rest and not rest.startswith("//"):
+        raise AsmError(path, line, "unexpected text after string literal")
+    values.append(0)
+    return values
+
+
 def prepare_source(text, path):
     out = []
     out_len = 0
@@ -130,6 +189,14 @@ def prepare_source(text, path):
             raise AsmError(path, line, "duplicate constant '%s'" % name)
         constants[name] = match.group(2)
         constants_lines[name] = line
+
+    def add_data_occurrence(kind, expression, line):
+        prefix = TRIWORD_DATA_PREFIX if kind == "triword" else DATA_PREFIX
+        index = len(occurrences)
+        start = out_len
+        append("%s%d__" % (prefix, index))
+        occurrences.append(Occurrence(
+            kind, start, out_len, line, expression, index))
 
     i = 0
     line = 1
@@ -186,6 +253,39 @@ def prepare_source(text, path):
                 in_directive = True
                 append(char)
                 i += 1
+                at_line_start = False
+                continue
+            data_match = DATA_DIRECTIVE_RE.match(text[i:])
+            if data_match:
+                directive = data_match.group(1)
+                end = text.find("\n", i)
+                if end < 0:
+                    end = len(text)
+                raw = text[i:end].rstrip("\r")
+                args = raw[data_match.end():].strip()
+                if not args:
+                    raise AsmError(path, line, ".%s requires an argument" % directive)
+                if directive == "tryte":
+                    add_data_occurrence("data", args, line)
+                    append(";")
+                elif directive == "triword":
+                    parts = [part.strip() for part in args.split(",")]
+                    if len(parts) == 1:
+                        add_data_occurrence("triword", args, line)
+                    elif len(parts) == 3:
+                        for expression in reversed(parts):
+                            if not expression:
+                                raise AsmError(path, line, "empty .triword component")
+                            add_data_occurrence("data", expression, line)
+                            append(";")
+                    else:
+                        raise AsmError(path, line,
+                                       ".triword expects one value or three components")
+                else:
+                    for value in decode_string_literal(args, path, line):
+                        encoded = char_to_tryte(value, path, line)
+                        append(format_tryte_value(encoded, path, line) + ";")
+                i = end
                 at_line_start = False
                 continue
             if text.startswith(".equ", i):
@@ -276,7 +376,7 @@ def prepare_source(text, path):
                            "constant '%s' conflicts with a label" % name)
 
     return SourceModel("".join(out), occurrences, labels, label_lines,
-                       constants, constants_lines)
+                       constants, constants_lines, path)
 
 
 def balanced_to_int(value):
@@ -301,6 +401,34 @@ def int_to_balanced(value):
     return "".join(reversed(digits))
 
 
+def format_tryte_value(value, path, line):
+    if value < MIN_TRYTE or value > MAX_TRYTE:
+        raise AsmError(path, line, "tryte value out of range")
+    return int_to_balanced(value).rjust(TRITS_PER_TRYTE, "0")
+
+
+def int_to_trytes(value, path, line):
+    trytes = []
+    for _ in range(TRYTES_PER_TRIWORD):
+        value, remainder = divmod(value, 3)
+        if remainder == 2:
+            remainder = -1
+            value += 1
+        trytes.append(format_tryte_value(remainder, path, line))
+    if value != 0:
+        raise AsmError(path, line, "triword value does not fit in 27 trits")
+    return trytes
+
+
+def char_to_tryte(value, path, line):
+    if value == 0:
+        return 0
+    encoded = value - 0x1F
+    if encoded < MIN_TRYTE or encoded > MAX_TRYTE:
+        raise AsmError(path, line, "character does not fit in a tryte")
+    return encoded
+
+
 def is_trit_token(token):
     return bool(token) and all(char in TRIT_CHARS for char in token)
 
@@ -310,14 +438,25 @@ def render(model, mode, expr_values=None, branch_offsets=None):
     last = 0
     for occurrence in model.occurrences:
         parts.append(model.base[last:occurrence.start])
-        if occurrence.kind == "expr":
+        if occurrence.kind in ("expr", "data", "triword"):
             if mode == 1:
-                parts.append("0")
+                parts.append("0;0;0;" if occurrence.kind == "triword" else "0")
             else:
                 value = (expr_values.get(occurrence.index)
                          if expr_values is not None else None)
                 if value is None:
-                    parts.append("%s%d__" % (UNRESOLVED_EXPR_PREFIX, occurrence.index))
+                    prefix = UNRESOLVED_EXPR_PREFIX
+                    if occurrence.kind == "data":
+                        prefix = UNRESOLVED_DATA_PREFIX
+                    elif occurrence.kind == "triword":
+                        prefix = UNRESOLVED_TRIWORD_PREFIX
+                    parts.append("%s%d__" % (prefix, occurrence.index))
+                elif occurrence.kind == "triword":
+                    trytes = int_to_trytes(value, model.path, occurrence.line)
+                    parts.append("".join(tryte + ";" for tryte in trytes))
+                elif occurrence.kind == "data":
+                    parts.append(format_tryte_value(
+                        value, model.path, occurrence.line))
                 else:
                     parts.append(int_to_balanced(value))
         else:
@@ -582,7 +721,7 @@ def evaluate_expressions(model, label_address, path):
     values = {}
     errors = {}
     for occurrence in model.occurrences:
-        if occurrence.kind != "expr":
+        if occurrence.kind not in ("expr", "data", "triword"):
             continue
         try:
             values[occurrence.index] = ExpressionParser(
@@ -600,23 +739,30 @@ def finalize_output(text, model, path, expr_errors=None):
     text = re.sub(re.escape(LABEL_PREFIX) + r"\d+\s*:", "", text)
 
     unresolved = re.search(
-        r"(%s|%s)(\d+)__" % (re.escape(UNRESOLVED_BRANCH_PREFIX),
-                             re.escape(UNRESOLVED_EXPR_PREFIX)), text)
+        r"(%s|%s|%s|%s)(\d+)__" % (
+            re.escape(UNRESOLVED_BRANCH_PREFIX),
+            re.escape(UNRESOLVED_EXPR_PREFIX),
+            re.escape(UNRESOLVED_DATA_PREFIX),
+            re.escape(UNRESOLVED_TRIWORD_PREFIX)), text)
     if unresolved:
         prefix, raw_index = unresolved.groups()
         index = int(raw_index)
+        occurrence = model.occurrences[index]
         if prefix == UNRESOLVED_BRANCH_PREFIX:
-            occurrence = model.occurrences[index]
             raise AsmError(path, occurrence.line,
                            "undefined branch target '%s'" % occurrence.data)
-        occurrence = model.occurrences[index]
-        message = "undefined expression in '@(%s)'" % occurrence.data
+        if prefix == UNRESOLVED_EXPR_PREFIX:
+            message = "undefined expression in '@(%s)'" % occurrence.data
+        else:
+            message = "undefined expression in data directive '%s'" % occurrence.data
         reason = expr_errors.get(index) if expr_errors else None
         if reason:
             message += ": " + reason
         raise AsmError(path, occurrence.line, message)
 
-    if re.search(r"__tas_(label|branch|expr|ubranch|uexpr)_", text):
+    if re.search(
+            r"__tas_(label|branch|expr|data|triword|ubranch|uexpr|udata|utriword)_",
+            text):
         raise AsmError(path, 0, "unresolved assembler placeholder")
 
     address = 0
