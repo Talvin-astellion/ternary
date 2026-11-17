@@ -49,6 +49,19 @@ def trit_string(value):
     return "".join(out)
 
 
+def balanced_literal(value):
+    if value == 0:
+        return "0"
+    digits = []
+    while value:
+        value, remainder = divmod(value, 3)
+        if remainder == 2:
+            remainder = -1
+            value += 1
+        digits.append({-1: "n", 0: "0", 1: "1"}[remainder])
+    return "".join(reversed(digits))
+
+
 def opcode_table():
     text = open(CPU_H, "r", encoding="utf-8").read()
     table = {}
@@ -186,6 +199,34 @@ def assemble_with_tas(source):
             return handle.read()
     finally:
         shutil.rmtree(tmpdir)
+
+
+def assemble_math_program(source):
+    tmpdir = tempfile.mkdtemp(prefix="tern-math-")
+    src = os.path.join(tmpdir, "math.tas")
+    out = os.path.join(tmpdir, "math.trt")
+    try:
+        with open(src, "w", encoding="utf-8") as handle:
+            handle.write(source + "\n")
+        result = subprocess.run(
+            [
+                sys.executable, os.path.join(ASMDIR, "tas.py"),
+                "--include", "assembler.inc",
+                "--include", "aliases.ymp",
+                src, "-o", out,
+            ],
+            cwd=ASMDIR,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        output = result.stdout + result.stderr
+        if result.returncode != 0:
+            raise AssertionError("tas.py failed\n%s" % output)
+        return tmpdir, out
+    except Exception:
+        shutil.rmtree(tmpdir)
+        raise
 
 
 def test_runtime_macros():
@@ -330,6 +371,53 @@ def test_serial_loader():
         raise AssertionError("serial loader program did not halt cleanly\n%s" % output)
 
 
+def test_math_library():
+    cases = [
+        ("MATH_MOD", 1071, 462, None, 147),
+        ("MATH_MOD", 49, 11, None, 5),
+        ("MATH_MOD", 21, 21, None, 0),
+        ("MATH_MOD", 7, 11, None, 7),
+        ("MATH_MOD", 0, 11, None, 0),
+        ("MATH_GCD", 1071, 462, None, 21),
+        ("MATH_GCD", 21, 0, None, 21),
+        ("MATH_GCD", 0, 21, None, 21),
+        ("MATH_GCD", 13, 17, None, 1),
+        ("MATH_MODPOW", 7, 0, 11, 1),
+        ("MATH_MODPOW", 7, 1, 11, 7),
+        ("MATH_MODPOW", 7, 2, 11, 5),
+        ("MATH_MODPOW", 7, 13, 11, 2),
+        ("MATH_MODPOW", 2, 10, 13, 10),
+    ]
+    for routine, a, b, c, expected in cases:
+        setup = [
+            "ADDI( P01, ZERO, _NOP, @(%s) );" % balanced_literal(a),
+            "ADDI( P02, ZERO, _NOP, @(%s) );" % balanced_literal(b),
+        ]
+        if c is not None:
+            setup.append("ADDI( P03, ZERO, _NOP, @(%s) );" % balanced_literal(c))
+        source = """--: @(start);
+10-:
+#include "lib/math.tas"
+start:
+IO_INIT
+%s
+CALL( %s );
+HALT;
+""" % ("\n".join(setup), routine)
+        tmpdir, program = assemble_math_program(source)
+        try:
+            output = run_emulator(program, "g\nq\n")
+        finally:
+            shutil.rmtree(tmpdir)
+        values = register_values(output, "GP01")
+        if not values or values[-1] != expected:
+            raise AssertionError(
+                "%s(%d, %d, %d) = %r, expected %d\n%s"
+                % (routine, a, b, c if c is not None else 0,
+                   values[-1] if values else None, expected, output)
+            )
+
+
 def expect_tas_error(source, expected):
     tmpdir = tempfile.mkdtemp(prefix="tern-tas-error-")
     src = os.path.join(tmpdir, "error.tas")
@@ -397,6 +485,7 @@ def main():
     test_examples()
     test_hello()
     test_serial_loader()
+    test_math_library()
     test_tas_errors()
     print("assembler encoding and emulator smoke tests passed")
     return 0

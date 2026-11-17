@@ -8,7 +8,7 @@ Assembly
 |yamp.py     | Experimental standalone macro preprocessor                     |
 |assembler.inc | Instruction macros, registers, modifiers and immediate encoding |
 |aliases.ymp | Optional pseudo-instructions such as `MV`, `JMP` and `SWP`     |
-|lib/        | Reusable `.tas` include files such as `io.tas`                 |
+|lib/        | Reusable `.tas` include files such as `io.tas` and `math.tas`  |
 |examples/   | Example `.tas` programs assembled into `out/*.trt`             |
 |serial_load.py | Serializer for streaming a `.trt` image into the loader     |
 |tests/      | Encoding and emulator smoke tests                              |
@@ -94,6 +94,22 @@ string through `ADDR_UART` and then halts.
 | `IO_READ_TRYTE` | Reads nine UART trit bytes and returns one tryte in `P01` |
 
 Include it with `#include "lib/io.tas"` and call routines with `CALL(label)`.
+
+## Math library
+
+`asm/lib/math.tas` provides integer helpers for nonnegative inputs:
+
+| Routine | Arguments / result |
+| --- | --- |
+| `MATH_MOD` | `P01 = P01 % P02`; requires `P01 >= 0` and `P02 > 0` |
+| `MATH_GCD` | `P01 = gcd(P01, P02)`; requires both arguments nonnegative |
+| `MATH_MODPOW` | `P01 = P01^P02 mod P03`; requires `P02 >= 0` and `P03 > 1` |
+
+All three routines return the result in `P01` and clobber scratch registers.
+`MATH_GCD` and `MATH_MODPOW` use `CALL`/`RET`, so run `IO_INIT` once first.
+Intermediate products must fit in the emulator's 27-trit word.
+Include the library with `#include "lib/math.tas"`; see
+`asm/examples/gcd.tas` and `asm/examples/modpow.tas`.
 
 ## Serial loader
 
