@@ -221,11 +221,88 @@ def test_examples():
     if actual != expected:
         raise AssertionError("fib result %r, expected %r" % (actual, expected))
 
+    labels = os.path.join(OUTDIR, "labels.trt")
+    output = run_emulator(labels, "g\nq\n")
+    expected = {"GP01": 1, "GP02": 4, "GP03": 6, "GP04": 5, "GP05": 9}
+    actual = {}
+    for register in expected:
+        values = register_values(output, register)
+        if not values:
+            raise AssertionError(
+                "unable to read labels register %s\n%s" % (register, output)
+            )
+        actual[register] = values[-1]
+    if actual != expected:
+        raise AssertionError(
+            "labels result %r, expected %r" % (actual, expected)
+        )
+
+
+def expect_tas_error(source, expected):
+    tmpdir = tempfile.mkdtemp(prefix="tern-tas-error-")
+    src = os.path.join(tmpdir, "error.tas")
+    out = os.path.join(tmpdir, "error.trt")
+    try:
+        with open(src, "w", encoding="utf-8") as handle:
+            handle.write(source + "\n")
+        result = subprocess.run(
+            [
+                sys.executable, os.path.join(ASMDIR, "tas.py"),
+                "--include", "assembler.inc",
+                "--include", "aliases.ymp",
+                src, "-o", out,
+            ],
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        output = result.stdout + result.stderr
+        if result.returncode == 0:
+            raise AssertionError("expected tas.py to reject: %s" % source)
+        if "Traceback" in output:
+            raise AssertionError("tas.py crashed instead of reporting an error\n%s" % output)
+        if expected not in output:
+            raise AssertionError("expected %r in tas.py output\n%s" % (expected, output))
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_tas_errors():
+    expect_tas_error(
+        """.equ A, MISSING + 1
+ADDI( P01, ZERO, _NOP, @(A));
+ADDI( PC, PC, _NOP, 0);
+""",
+        "undefined symbol 'MISSING'",
+    )
+    expect_tas_error(
+        """.equ A, B + 1
+.equ B, A + 1
+ADDI( P01, ZERO, _NOP, @(A));
+ADDI( PC, PC, _NOP, 0);
+""",
+        "constant cycle involving",
+    )
+    expect_tas_error(
+        """BRANCH(missing);
+ADDI( PC, PC, _NOP, 0);
+""",
+        "undefined branch target 'missing'",
+    )
+    expect_tas_error(
+        """x:
+x:
+ADDI( PC, PC, _NOP, 0);
+""",
+        "duplicate label 'x'",
+    )
+
 
 def main():
     test_encodings()
     test_runtime_macros()
     test_examples()
+    test_tas_errors()
     print("assembler encoding and emulator smoke tests passed")
     return 0
 

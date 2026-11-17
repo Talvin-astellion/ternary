@@ -77,8 +77,10 @@ An [emulator](emu/) which contains an library for performing ternary operations
 is the first piece of software written on this project. It is needed to to test
 the design and anything  written for it.
 
-A macro-based cross-assembler lives in [asm/](asm/) and uses the C preprocessor
-to turn `.tas` sources into loadable `.trt` files.
+A macro-based cross-assembler lives in [asm/](asm/) and uses a Python driver
+plus the C preprocessor to turn `.tas` sources into loadable `.trt` files.  It
+supports symbolic labels, `.equ` constants, `@(expr)` operands and relative
+branches.
 
 At some point a simple forth like environment based on a port of
 [JONESFORTH](https://rwmj.wordpress.com/2010/08/07/jonesforth-git-repository/) .

@@ -2,11 +2,10 @@
 
 OUTDIR=out
 SRCDIR=examples
-#PP=yamp.py
-PP=gcc -E -xc
-PPFLAGS=--include assembler.inc --include aliases.ymp
 MKDIR=@mkdir
 PYTHON=python3
+TAS=$(PYTHON) tas.py
+TASFLAGS=--include assembler.inc --include aliases.ymp
 EMUDIR=../emu/
 EMUEXE=tern-cpu-emu
 EMU=$(EMUDIR)$(EMUEXE)
@@ -20,8 +19,8 @@ $(OUTDIR):
 	$(MKDIR) $(OUTDIR)
 
 # Rule to assemble Ternary Assembly into loadable Trit files
-$(OUTDIR)/%.trt: $(SRCDIR)/%.tas assembler.inc aliases.ymp | $(OUTDIR)
-	$(PP) $(PPFLAGS) $< -o $@
+$(OUTDIR)/%.trt: $(SRCDIR)/%.tas tas.py assembler.inc aliases.ymp | $(OUTDIR)
+	$(TAS) $(TASFLAGS) $< -o $@
 
 # Rule to run a Trit file in the emulator
 %: $(OUTDIR)/%.trt $(EMU)

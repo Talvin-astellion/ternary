@@ -4,15 +4,18 @@ Assembly
 ## Files
 | Files      | Description                                                    |
 -------------|----------------------------------------------------------------|
+|tas.py      | Assembler driver for labels, `.equ`, `@(expr)` and `BRANCH()`  |
 |yamp.py     | Experimental standalone macro preprocessor                     |
 |assembler.inc | Instruction macros, registers, modifiers and immediate encoding |
 |aliases.ymp | Optional pseudo-instructions such as `MV`, `JMP` and `SWP`     |
 |examples/   | Example `.tas` programs assembled into `out/*.trt`             |
 |tests/      | Encoding and emulator smoke tests                              |
 
-The Makefile uses the system C preprocessor (`gcc -E -xc`) and automatically
-includes `assembler.inc` and `aliases.ymp`.  `yamp.py` is a partial standalone
-replacement and is not used by the default build yet.
+The Makefile runs `tas.py`, which invokes the system C preprocessor
+(`gcc -E -xc`) and automatically includes `assembler.inc` and `aliases.ymp`.
+`tas.py` adds symbolic labels, `.equ` constants, `@(expr)` operands and
+`BRANCH(label)` fixups on top of the macro layer.  `yamp.py` is a partial
+standalone preprocessor replacement and is not used by the default build.
 
 ## Build and test
 
@@ -26,6 +29,40 @@ Run an assembled program with the emulator:
 
 ```sh
 ./emu/tern-cpu-emu asm/out/fib.trt
+```
+
+## Labels and expressions
+
+`tas.py` performs two preprocessor passes.  The first pass measures labels and
+branch locations; the second pass substitutes final addresses and expressions.
+
+```asm
+.equ COUNT, 10              // balanced ternary 3
+.equ LIMIT, COUNT + 1       // 4
+
+start:
+ADDI( P01, ZERO, _NOP, 1);
+BRANCH(done);               // skip the next instruction
+ADDI( P01, ZERO, _NOP, 1n);
+done:
+ADDI( P02, ZERO, _NOP, @(LIMIT));
+ADDI( P03, ZERO, _NOP, @(done - start));
+```
+
+- `name:` defines a label at the current tryte address.  Names made only of
+  trit characters are still treated as numeric addresses (`nn:` is -4).
+- `.equ NAME, expr` defines a constant.  Expressions use balanced ternary
+  literals (`10`, `1n`, optional `0t` prefix), labels, parentheses and
+  `+ - * / %`.
+- `@(expr)` substitutes the value as a balanced ternary immediate.
+- `BRANCH(label)` emits an unconditional relative branch.  The target must fit
+  in the eight-trit ADDI immediate.
+
+Direct invocation is also supported:
+
+```sh
+python3 asm/tas.py --include assembler.inc --include aliases.ymp \
+    asm/examples/labels.tas -o /tmp/labels.trt
 ```
 
 ## Code
