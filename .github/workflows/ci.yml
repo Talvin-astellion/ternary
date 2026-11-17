@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          gcc --version | head -n 1
+          python3 --version
+          make --version | head -n 1
+
+      - name: Assembler tests
+        run: make -C asm test
+
+      - name: Emulator tests
+        run: make -C emu test
+
+      - name: Emulator sanitizer tests
+        run: make -C emu sanitize
