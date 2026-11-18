@@ -565,6 +565,7 @@ def main():
     test_serial_loader()
     test_math_library()
     test_math_helpers()
+    test_numeric_io()
     test_tas_errors()
     print("assembler encoding and emulator smoke tests passed")
     return 0
