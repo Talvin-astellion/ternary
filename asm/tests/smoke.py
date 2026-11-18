@@ -418,6 +418,84 @@ HALT;
             )
 
 
+def check_math_helper(routine, operands, expected):
+    setup = [
+        "ADDI( %s, ZERO, _NOP, @(%s) );" % (register, balanced_literal(value))
+        for register, value in zip(("P01", "P02", "P03"), operands)
+    ]
+    source = """--: @(start);
+10-:
+#include "lib/math.tas"
+start:
+IO_INIT
+%s
+CALL( %s );
+HALT;
+""" % ("\n".join(setup), routine)
+    tmpdir, program = assemble_math_program(source)
+    try:
+        output = run_emulator(program, "g\nq\n")
+    finally:
+        shutil.rmtree(tmpdir)
+    for register, expected_value in expected.items():
+        values = register_values(output, register)
+        if not values or values[-1] != expected_value:
+            raise AssertionError(
+                "%s%r: %s = %r, expected %d\n%s"
+                % (routine, operands, register,
+                   values[-1] if values else None, expected_value, output)
+            )
+
+
+def test_math_helpers():
+    check_math_helper("MATH_ABS", [-13], {"GP01": 13})
+    check_math_helper("MATH_ABS", [13], {"GP01": 13})
+    check_math_helper("MATH_NEG", [-13], {"GP01": 13})
+    check_math_helper("MATH_NEG", [13], {"GP01": -13})
+    check_math_helper("MATH_SGN", [-13], {"GP01": -1})
+    check_math_helper("MATH_SGN", [0], {"GP01": 0})
+    check_math_helper("MATH_SGN", [13], {"GP01": 1})
+    check_math_helper("MATH_MIN", [-13, 7], {"GP01": -13})
+    check_math_helper("MATH_MIN", [7, 7], {"GP01": 7})
+    check_math_helper("MATH_MAX", [-13, 7], {"GP01": 7})
+    check_math_helper("MATH_MAX", [7, 7], {"GP01": 7})
+    check_math_helper("MATH_DIV", [1071, 462], {"GP01": 2, "GP02": 147})
+    check_math_helper("MATH_DIV", [49, 11], {"GP01": 4, "GP02": 5})
+    check_math_helper("MATH_DIV", [21, 21], {"GP01": 1, "GP02": 0})
+    check_math_helper("MATH_DIV", [7, 11], {"GP01": 0, "GP02": 7})
+    check_math_helper("MATH_DIV", [0, 11], {"GP01": 0, "GP02": 0})
+
+
+def test_numeric_io():
+    source = """--: @(start);
+10-:
+#include "lib/io.tas"
+start:
+IO_INIT
+CALL( IO_GET_WORD );
+CALL( IO_PUT_WORD );
+HALT;
+"""
+    tmpdir, program = assemble_math_program(source)
+    try:
+        for value in (0, 13, 1071, -13, 2187):
+            text = balanced_literal(value).rjust(27, "0")
+            output = run_emulator_bytes(
+                program, b"g\n" + text.encode("ascii") + b"\n"
+            )
+            if text not in output:
+                raise AssertionError(
+                    "numeric I/O round trip for %d did not print %r\n%s"
+                    % (value, text, output)
+                )
+            if "CPU trap 1" in output:
+                raise AssertionError(
+                    "numeric I/O round trip for %d trapped\n%s" % (value, output)
+                )
+    finally:
+        shutil.rmtree(tmpdir)
+
+
 def expect_tas_error(source, expected):
     tmpdir = tempfile.mkdtemp(prefix="tern-tas-error-")
     src = os.path.join(tmpdir, "error.tas")
@@ -486,6 +564,7 @@ def main():
     test_hello()
     test_serial_loader()
     test_math_library()
+    test_math_helpers()
     test_tas_errors()
     print("assembler encoding and emulator smoke tests passed")
     return 0
