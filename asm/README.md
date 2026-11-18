@@ -92,8 +92,15 @@ string through `ADDR_UART` and then halts.
 | `IO_PUTS` | `P01` = address of a zero-terminated string; leaves `P01` at the terminator |
 | `IO_GETC` | Returns a character in `P01` and status in `P02` (+1 ready, 0 empty, -1 EOF) |
 | `IO_READ_TRYTE` | Reads nine UART trit bytes and returns one tryte in `P01` |
+| `IO_PUT_WORD` | `P01` = word; writes its fixed 27-trit representation (`n`/`0`/`1`, most significant trit first) |
+| `IO_GET_WORD` | Reads 27 `n`/`0`/`1` characters and returns the assembled word in `P01` |
+
+`IO_PUT_WORD` clobbers `P01`, `P06`-`P12` and `SP`; `IO_GET_WORD` clobbers
+`P01`-`P12`.  Both use `CALL`/`RET`, so run `IO_INIT` once first.  Unknown input
+characters are treated as `0`.
 
 Include it with `#include "lib/io.tas"` and call routines with `CALL(label)`.
+`asm/examples/numeric_io.tas` reads a 27-trit word and prints it back.
 
 ## Math library
 
@@ -104,9 +111,16 @@ Include it with `#include "lib/io.tas"` and call routines with `CALL(label)`.
 | `MATH_MOD` | `P01 = P01 % P02`; requires `P01 >= 0` and `P02 > 0` |
 | `MATH_GCD` | `P01 = gcd(P01, P02)`; requires both arguments nonnegative |
 | `MATH_MODPOW` | `P01 = P01^P02 mod P03`; requires `P02 >= 0` and `P03 > 1` |
+| `MATH_ABS` | `P01 = abs(P01)` |
+| `MATH_NEG` | `P01 = -P01` |
+| `MATH_SGN` | `P01 = -1/0/+1` for negative/zero/positive `P01` |
+| `MATH_MIN` | `P01 = min(P01, P02)` |
+| `MATH_MAX` | `P01 = max(P01, P02)` |
+| `MATH_DIV` | `P01 = P01 / P02`, `P02 = P01 % P02`; requires `P02 > 0` |
 
-All three routines return the result in `P01` and clobber scratch registers.
-`MATH_GCD` and `MATH_MODPOW` use `CALL`/`RET`, so run `IO_INIT` once first.
+All routines return results in `P01` and clobber scratch registers.
+`MATH_GCD`, `MATH_MODPOW`, `MATH_MIN`, `MATH_MAX` and `MATH_DIV` use
+flags/`CALL` internally, so run `IO_INIT` once first and do not rely on `P12`.
 Intermediate products must fit in the emulator's 27-trit word.
 Include the library with `#include "lib/math.tas"`; see
 `asm/examples/gcd.tas` and `asm/examples/modpow.tas`.

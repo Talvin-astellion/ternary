@@ -154,9 +154,9 @@ storage of information digits needs by symbol differentiation.
 - [x] Load RAM from File
 - [x] Macro-based cross-assembler; standalone preprocessor still incomplete
 - [x] Expand math operations to cover a full 32 Trits
-- [ ] Trinary I/O should be more generic
-    - [ ] Work with strings
-    - [ ] Work with balanced base 27 input
+- [x] Trinary I/O should be more generic
+    - [x] Work with strings
+    - [x] Work with balanced base 27 input
 - [ ] expand Register PreModifier to cover all 27 possible single input functions
 - [ ] Look into 5 trit for Reg Mod pre op bits (all 27 functions + shift by +/- 18, 9, 3, 1, 0)
 - [ ] Look into a 9 trit instruction word size
