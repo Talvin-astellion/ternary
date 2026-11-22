@@ -69,6 +69,14 @@ decoder, including its low-eleven-trit address wrapping and bounds checks.
 The core tests exhaust all 22-bit address encodings against the general
 conversion, including undefined trits and high-bit aliases.
 
+For assembled guest workloads, run `make -C asm bench BENCH_RUNS=5`.  This builds
+`emu/bench-guest` and measures only CPU execution, excluding image loading and
+reset.  Each run starts with a fresh image, must reach HALT within `BENCH_LIMIT`
+(default 1000000 instructions), and checks `P01` and a repeatable instruction
+count.  The workloads fill and sum negative RAM through a positive alias, and
+exercise modular exponentiation with library calls, branches and stack traffic.
+See [the assembler benchmarks](../asm/README.md#guest-benchmarks) for details.
+
 ## Monitor
 
 ```sh

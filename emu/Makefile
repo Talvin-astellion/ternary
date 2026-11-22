@@ -83,6 +83,9 @@ bench-cpu: $(BENCH_SRCS) $(BENCH_HEADERS)
 bench-cpu-uncached: $(BENCH_SRCS) $(BENCH_HEADERS)
 	$(CC) $(CFLAGS) -DTERNARY_DECODE_CACHE=0 $(BENCH_SRCS) -o $@
 
+bench-guest: tests/bench_guest.c $(CORE_SRCS) $(BENCH_HEADERS)
+	$(CC) $(CFLAGS) tests/bench_guest.c $(CORE_SRCS) -o $@
+
 .PHONY: bench
 bench: bench-cpu bench-cpu-uncached
 	@echo "Decode cache disabled:"
@@ -135,7 +138,7 @@ clean: clean-obj clean-asm
 	rm -rf *~
 
 clean-pkg: clean clean-dep
-	rm -rf $(PKG) $(GUEST) tern-test $(TESTBIN) $(TESTBIN)-san $(TMLTESTBIN) $(TMLTESTBIN)-san $(PHASE2TESTBIN) $(PHASE2TESTBIN)-san bench-cpu bench-cpu-uncached
+	rm -rf $(PKG) $(GUEST) tern-test $(TESTBIN) $(TESTBIN)-san $(TMLTESTBIN) $(TMLTESTBIN)-san $(PHASE2TESTBIN) $(PHASE2TESTBIN)-san bench-cpu bench-cpu-uncached bench-guest
 
 rebuild: clean-pkg pkg
 

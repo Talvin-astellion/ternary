@@ -10,6 +10,7 @@ Assembly
 |aliases.ymp | Optional pseudo-instructions such as `MV`, `JMP` and `SWP`     |
 |lib/        | Reusable `.tas` include files such as `io.tas` and `math.tas`  |
 |examples/   | Example `.tas` programs assembled into `out/*.trt`             |
+|benchmarks/ | Repeatable guest performance workloads                        |
 |serial_load.py | Serializer for streaming a `.trt` image into the loader     |
 |tests/      | Encoding and emulator smoke tests                              |
 
@@ -34,6 +35,34 @@ Run an assembled program with the emulator:
 ```sh
 ./emu/tern-cpu-emu asm/out/fib.trt
 ```
+
+## Guest benchmarks
+
+```sh
+make -C asm bench                          # five fresh runs per workload
+make -C asm bench BENCH_RUNS=20             # longer measurements
+```
+
+| Workload | Coverage | Expected `P01` (decimal) |
+| --- | --- | --- |
+| `benchmarks/memory.tas` | Fill 2187 triwords in negative RAM and sum through a positive RAM alias; LD3/ST3 and conditional loops | 2392578 |
+| `benchmarks/math.tas` | Sum 243 calls to modular exponentiation; arithmetic, conditional branches, calls/returns and stack traffic | 486 |
+
+The runner reloads each image before timing CPU execution with a monotonic
+clock.  Every run must halt without a trap, produce the expected result, and
+execute the same number of instructions.  `BENCH_LIMIT` bounds instructions per
+run (default 1000000); results report total elapsed CPU-execution wall time and
+millions of guest instructions per second.  Timings are informational, with no
+machine-dependent pass threshold.
+
+The runner can also measure another noninteractive program returning in `P01`:
+
+```sh
+./emu/bench-guest program.trt EXPECTED_P01 [RUNS [INSTRUCTION_LIMIT]]
+```
+
+All runner arguments after the path are decimal.  Programs should avoid UART
+input or output so terminal I/O does not dominate the measurement.
 
 ## Labels and expressions
 
