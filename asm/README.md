@@ -55,6 +55,11 @@ run (default 1000000); results report total elapsed CPU-execution wall time and
 millions of guest instructions per second.  Timings are informational, with no
 machine-dependent pass threshold.
 
+Timings can be bimodal because code layout and host scheduling affect this hot
+loop.  For comparisons, pin both binaries to the same idle core (for example
+`taskset -c <core> ../emu/bench-guest ...`), run at least ten interleaved
+repetitions, and compare medians.  Do not compare runs executed in parallel.
+
 The runner can also measure another noninteractive program returning in `P01`:
 
 ```sh

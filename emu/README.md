@@ -60,6 +60,8 @@ make -C emu bench BENCH_CYCLES=3000000
 Workloads cover a NOP loop, an arithmetic loop, arithmetic with taint tracking,
 and 512 distinct NOP words that exceed cache capacity.  Repeat runs to compare
 timings on your machine; this is a synthetic benchmark, not a timing-based test.
+Guest timings can be bimodal due to code layout and host scheduling; pin runs to
+one idle core, interleave binaries and compare medians rather than single runs.
 To profile either version directly, use `emu/bench-cpu [N]` or
 `emu/bench-cpu-uncached [N]`.  The latter is compiled with
 `-DTERNARY_DECODE_CACHE=0`, which can also disable caching in a normal build.
