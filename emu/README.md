@@ -76,6 +76,11 @@ increments do not touch all 32 trits.  A differential test compares the fast
 path against a reference adder over random operands, undefined-trit encodings
 and long carry chains.
 
+Register reads skip the tritwise modifier gate when it is the identity
+(`OPMOD_NOP`) and the value contains no undefined trits; undefined trits would
+otherwise be mapped to zero.  Tests cover both trit kinds and confirm that the
+shift modifier is applied before the identity check.
+
 For assembled guest workloads, run `make -C asm bench BENCH_RUNS=5`.  This builds
 `emu/bench-guest` and measures only CPU execution, excluding image loading and
 reset.  Each run starts with a fresh image, must reach HALT within `BENCH_LIMIT`

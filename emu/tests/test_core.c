@@ -68,6 +68,21 @@ static void testRegisterValidation( void )
     WriteReg( &cpu, 0x02, ternaryFromInt64( 7 ) );
     CHECK( ternary2int( cpu.regs[2] ) == 0 );
     CHECK( ternary2int( ReadModReg( &cpu, 0x02, OPMOD_NOP ) ) == 0 );
+
+    /* The NOP gate maps undefined trits to zero; the fast path must skip. */
+    cpu.regs[REG_P01] = (TriWord)2 << ( 2 * BITS_PER_TRIT );
+    CHECK( ReadModReg( &cpu, REG_P01, OPMOD_NOP ) == 0 );
+
+    cpu.regs[REG_P01] = ( (TriWord)2 << ( 2 * BITS_PER_TRIT ) ) |
+                        ( (TriWord)1 << ( 4 * BITS_PER_TRIT ) );
+    CHECK( ReadModReg( &cpu, REG_P01, OPMOD_NOP ) ==
+           ( (TriWord)1 << ( 4 * BITS_PER_TRIT ) ) );
+
+    /* The shift select runs before the identity check. */
+    cpu.regs[REG_P01] = ( (TriWord)2 << ( 20 * BITS_PER_TRIT ) ) |
+                        ternaryFromInt64( 3 );
+    CHECK( ReadModReg( &cpu, REG_P01,
+                       OPMOD_NOP | ( (Tryte)N << ( 3 * BITS_PER_TRIT ) ) ) == 0 );
 }
 
 static void testMemory( void )

@@ -238,6 +238,19 @@ void WriteTryte( TriCpu* cpu, TriWord addr , Tryte val )
  * @param
  * @return
  */
+static int hasUndefinedTrit( TriWord val )
+{
+    /* A 2-bit trit field is undefined exactly when its high bit is set and
+     * its low bit is clear (the encoding 10). */
+    return ( ( ( val >> 1 ) & ~val & UINT64_C(0x5555555555555555) ) != 0 );
+}
+
+/**
+ * [Description]
+ *
+ * @param
+ * @return
+ */
 TriWord ReadModReg( TriCpu* cpu, Tryte reg, Tryte mod )
 {
     TriWord val=0;
@@ -264,6 +277,15 @@ TriWord ReadModReg( TriCpu* cpu, Tryte reg, Tryte mod )
         default:
             // Undefined shift modifier: leave the value unchanged.
             break;
+    }
+
+    /* OPMOD_NOP is the identity gate for defined trits.  Skip the 32-trit
+     * walk when the value has no undefined trits; those map to zero. */
+    if( ( mod & ( ( 1 << (3 * BITS_PER_TRIT) ) - 1 ) ) ==
+        ( OPMOD_NOP & ( ( 1 << (3 * BITS_PER_TRIT) ) - 1 ) ) &&
+        !hasUndefinedTrit( val ) )
+    {
+        return signExtendTriWord( val );
     }
 
     return signExtendTriWord(
