@@ -33,9 +33,28 @@
 
 #include <stdio.h>
 /* Defines *******************************************************************/
+#ifndef TERNARY_DECODE_CACHE
+#define TERNARY_DECODE_CACHE 1
+#endif
+
+#define DECODE_CACHE_BITS 8
+
 /* Types *********************************************************************/
+#if TERNARY_DECODE_CACHE
+typedef struct
+{
+    int valid;
+    TriWord word;
+    TriOpInstruction fields;
+} DecodeCacheEntry;
+#endif
+
 /* Interfaces ****************************************************************/
 /* Data **********************************************************************/
+#if TERNARY_DECODE_CACHE
+static DecodeCacheEntry decodeCache[1U << DECODE_CACHE_BITS];
+#endif
+
 /* Functions *****************************************************************/
 /**
  * [Description]
@@ -278,6 +297,19 @@ static InstructionFormat printOpcode(TriOpcode op)
  */
 void parseInstruction( TriOpInstruction* fields, TriWord inst )
 {
+#if TERNARY_DECODE_CACHE
+    /* Key by content, not PC: stores, RAM aliases and reloads need no invalidation. */
+    uint64_t hash = inst ^ ( inst >> 27 );
+    DecodeCacheEntry* entry;
+    hash *= UINT64_C(0x9e3779b97f4a7c15);
+    entry = &decodeCache[hash >> ( 64 - DECODE_CACHE_BITS )];
+    if( entry->valid && entry->word == inst )
+    {
+        *fields = entry->fields;
+        return;
+    }
+#endif
+
     // | 4 Immediate | 7 R3+Mod | 7 R2+Mod | 3 R1 | 6 OpCode |
     // | 11 Immediate           | 7 R2+Mod | 3 R1 | 6 OpCode |
     // | 18 Immediate                      | 3 R1 | 6 OpCode |
@@ -293,6 +325,12 @@ void parseInstruction( TriOpInstruction* fields, TriWord inst )
     fields->imm9_1 = expandImmediate((inst >> 18 ) & 0x003FFFF);
     fields->imm9_2 = expandImmediate((inst >> 36 ) & 0x003FFFF);
     //fields->imm18 = expandImmediate((inst >> 18 ) & 0x0FFFFFFFFFULL);
+
+#if TERNARY_DECODE_CACHE
+    entry->word = inst;
+    entry->fields = *fields;
+    entry->valid = 1;
+#endif
 }
 
 /*

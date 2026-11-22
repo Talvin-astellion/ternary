@@ -27,10 +27,41 @@ the analysis tools are optional Python 3 scripts.
 make -C emu                 # builds emu/tern-cpu-emu
 make -C emu test            # core, TML and trace/taint/symbolic tests
 make -C emu sanitize        # same tests with ASan and UBSan
+make -C emu bench           # compare cached and uncached instruction decoding
 ```
 
 `make -C emu all` additionally builds Doxygen documentation and therefore
 requires `doxygen`; plain `make` does not.
+
+## Instruction decoding and performance
+
+`parseInstruction()` uses a bounded, direct-mapped cache of 256 decoded words,
+shared by CPU execution, disassembly, tracing, taint and symbolic analysis.
+Entries are filled on demand (cache-aside); a collision replaces one entry, and
+the complete instruction word is checked before returning a cached copy.  Memory
+usage stays fixed, with no allocation in the execution loop.
+
+The key is the instruction's contents rather than its address.  Instruction
+fetches still read the memory bus on every step, so guest stores, monitor writes,
+RAM aliases, program reloads and memory resets take effect immediately.  Cached
+fields contain no CPU or memory state and need no reset-time invalidation.
+
+This follows the [System Design Primer's cache-aside approach](https://github.com/donnemartin/system-design-primer#cache-aside)
+and its [benchmark/profile/optimize workflow](https://github.com/donnemartin/system-design-primer/blob/master/solutions/system_design/scaling_aws/README.md).
+The benchmark runs the same deterministic programs with and without the cache,
+checks the resulting CPU state, and reports elapsed monotonic time and millions
+of instructions per second:
+
+```sh
+make -C emu bench BENCH_CYCLES=3000000
+```
+
+Workloads cover a NOP loop, an arithmetic loop, arithmetic with taint tracking,
+and 512 distinct NOP words that exceed cache capacity.  Repeat runs to compare
+timings on your machine; this is a synthetic benchmark, not a timing-based test.
+To profile either version directly, use `emu/bench-cpu [N]` or
+`emu/bench-cpu-uncached [N]`.  The latter is compiled with
+`-DTERNARY_DECODE_CACHE=0`, which can also disable caching in a normal build.
 
 ## Monitor
 

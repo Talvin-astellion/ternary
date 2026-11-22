@@ -73,6 +73,22 @@ PHASE2TESTBIN=test-phase2
 TEST_SRCS=tests/test_core.c $(CORE_SRCS)
 TML_TEST_SRCS=tests/test_tml.c $(CORE_SRCS)
 PHASE2_TEST_SRCS=tests/test_phase2.c $(CORE_SRCS)
+BENCH_SRCS=tests/bench_cpu.c $(CORE_SRCS)
+BENCH_HEADERS=$(wildcard *.h)
+BENCH_CYCLES?=1000000
+
+bench-cpu: $(BENCH_SRCS) $(BENCH_HEADERS)
+	$(CC) $(CFLAGS) $(BENCH_SRCS) -o $@
+
+bench-cpu-uncached: $(BENCH_SRCS) $(BENCH_HEADERS)
+	$(CC) $(CFLAGS) -DTERNARY_DECODE_CACHE=0 $(BENCH_SRCS) -o $@
+
+.PHONY: bench
+bench: bench-cpu bench-cpu-uncached
+	@echo "Decode cache disabled:"
+	./bench-cpu-uncached $(BENCH_CYCLES)
+	@echo "Decode cache enabled:"
+	./bench-cpu $(BENCH_CYCLES)
 
 $(TESTBIN): $(TEST_SRCS) cpu.h mem.h ternary.h disassem.h tests/test_core.c
 	@echo "Generating $@"
@@ -119,7 +135,7 @@ clean: clean-obj clean-asm
 	rm -rf *~
 
 clean-pkg: clean clean-dep
-	rm -rf $(PKG) $(GUEST) tern-test $(TESTBIN) $(TESTBIN)-san $(TMLTESTBIN) $(TMLTESTBIN)-san $(PHASE2TESTBIN) $(PHASE2TESTBIN)-san
+	rm -rf $(PKG) $(GUEST) tern-test $(TESTBIN) $(TESTBIN)-san $(TMLTESTBIN) $(TMLTESTBIN)-san $(PHASE2TESTBIN) $(PHASE2TESTBIN)-san bench-cpu bench-cpu-uncached
 
 rebuild: clean-pkg pkg
 

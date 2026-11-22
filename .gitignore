@@ -43,6 +43,8 @@ emu/test-tml
 emu/test-tml-san
 emu/test-phase2
 emu/test-phase2-san
+emu/bench-cpu
+emu/bench-cpu-uncached
 asm/out/
 
 # Debug files

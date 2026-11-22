@@ -1,4 +1,5 @@
 #include "../cpu.h"
+#include "../disassem.h"
 #include "../mem.h"
 
 #include <stdio.h>
@@ -90,6 +91,109 @@ static TriWord makeRegInstruction( TriOpcode opcode, TriReg r1, TriReg r2,
     inst |= (TriWord)OPMOD_NOP << 32;
     inst |= (TriWord)r3 << 40;
     return inst;
+}
+
+static void testDecode( void )
+{
+    TriOpInstruction fields;
+    TriWord inst;
+    int pass, i;
+
+    /* Zero is a real instruction word, including on a cold cache. */
+    parseInstruction( &fields, 0 );
+    CHECK( fields.opcode == OPCODE_NOP );
+    CHECK( fields.r1 == REG_ZERO );
+    CHECK( fields.r2 == REG_ZERO );
+    CHECK( fields.r3 == REG_ZERO );
+    CHECK( fields.r2mod == 0 );
+    CHECK( fields.r3mod == 0 );
+    CHECK( fields.imm11 == 0 );
+    CHECK( fields.imm9_1 == 0 );
+    CHECK( fields.imm9_2 == 0 );
+
+    inst = OPCODE_ADSI | ( (TriWord)REG_P01 << 12 ) |
+           ( UINT64_C(0b00010101) << 18 ) | ( UINT64_C(0b00111111) << 36 );
+    parseInstruction( &fields, inst );
+    CHECK( fields.imm9_1 == ternaryFromInt64( 3812798742493LL ) );
+    CHECK( fields.imm9_2 == TRIWORD_MASK );
+    fields.imm9_1 = 0;
+    parseInstruction( &fields, inst );
+    CHECK( fields.imm9_1 == ternaryFromInt64( 3812798742493LL ) );
+
+    /* Exercise more distinct words than the cache can hold, then revisit them. */
+    for( pass = 0; pass < 2; ++pass )
+    {
+        for( i = 0; i < 4096; ++i )
+        {
+            int n = pass ? 4095 - i : i;
+            TriReg r1 = (TriReg)ternaryFromInt64( n % 27 - 13 );
+            TriReg r2 = (TriReg)ternaryFromInt64( n / 27 % 27 - 13 );
+            TriReg r3 = (TriReg)ternaryFromInt64( n / 729 % 27 - 13 );
+            r1 &= 0x3F;
+            r2 &= 0x3F;
+            r3 &= 0x3F;
+            inst = makeRegInstruction( OPCODE_ADD, r1, r2, r3 );
+            parseInstruction( &fields, inst );
+            CHECK( fields.opcode == OPCODE_ADD );
+            CHECK( fields.r1 == r1 );
+            CHECK( fields.r2 == r2 );
+            CHECK( fields.r3 == r3 );
+            CHECK( fields.r2mod == OPMOD_NOP );
+            CHECK( fields.r3mod == OPMOD_NOP );
+        }
+    }
+}
+
+static void testInstructionRewrite( void )
+{
+    TriCpu cpu;
+    TriWord pc = ternaryFromInt64( 100 );
+    TriWord inst = makeRegInstruction( OPCODE_ADD, REG_P01, REG_P02, REG_P03 );
+    TriWord replacement;
+    TriWord store;
+
+    resetMem();
+    resetCPU( &cpu );
+    WriteReg( &cpu, REG_P02, ternaryFromInt64( 7 ) );
+    WriteReg( &cpu, REG_P03, ternaryFromInt64( 11 ) );
+    WriteReg( &cpu, REG_P04, ternaryFromInt64( 13 ) );
+    WriteTriWord( &cpu, pc, inst );
+    cpu.regs[REG_PC] = pc;
+    runCPU( &cpu, 1 );
+    CHECK( triwordToInt( cpu.regs[REG_P01] ) == 18 );
+
+    /* Patching only the high tryte through a RAM alias must change decoding. */
+    replacement = makeRegInstruction( OPCODE_ADD, REG_P01, REG_P02, REG_P04 );
+    WriteAddr( ternaryFromInt64( 102 + RAM_SIZE ),
+               (Tryte)( replacement >> ( 2 * BITS_PER_TRYTE ) ) );
+    cpu.regs[REG_PC] = pc;
+    runCPU( &cpu, 1 );
+    CHECK( triwordToInt( cpu.regs[REG_P01] ) == 20 );
+    cpu.regs[REG_PC] = ternaryFromInt64( 100 + RAM_SIZE );
+    runCPU( &cpu, 1 );
+    CHECK( triwordToInt( cpu.regs[REG_P01] ) == 20 );
+
+    /* A guest ST3 can replace a previously executed instruction as well. */
+    replacement = makeRegInstruction( OPCODE_MUL, REG_P01, REG_P02, REG_P03 );
+    WriteReg( &cpu, REG_P05, pc );
+    WriteReg( &cpu, REG_P06, replacement );
+    store = OPCODE_ST3 | ( (TriWord)REG_P05 << 12 ) |
+            ( (TriWord)OPMOD_NOP << 18 ) | ( (TriWord)REG_P06 << 26 );
+    WriteTriWord( &cpu, ternaryFromInt64( 103 ), store );
+    cpu.regs[REG_PC] = ternaryFromInt64( 103 );
+    runCPU( &cpu, 1 );
+    cpu.regs[REG_PC] = pc;
+    runCPU( &cpu, 1 );
+    CHECK( triwordToInt( cpu.regs[REG_P01] ) == 77 );
+    CHECK( cpu.halted == 0 );
+    CHECK( cpu.trap == 0 );
+
+    resetMem();
+    resetCPU( &cpu );
+    cpu.regs[REG_PC] = pc;
+    runCPU( &cpu, 1 );
+    CHECK( triwordToInt( cpu.regs[REG_P01] ) == 0 );
+    CHECK( triwordToInt( cpu.regs[REG_CLOCK] ) == 1 );
 }
 
 static void testHaltAndClock( void )
@@ -208,6 +312,8 @@ int main( void )
     testRotatePair();
     testRegisterValidation();
     testMemory();
+    testDecode();
+    testInstructionRewrite();
     testHaltAndClock();
     testTraps();
     testWordWidthAndFlags();

@@ -64,7 +64,9 @@ typedef struct TriOpInstruction
 /* Functions *****************************************************************/
 
 /**
- * [Description]
+ * Decode an instruction, reusing a bounded cache keyed by the complete word.
+ * The returned fields are a copy and may be modified by the caller.
+ * Define TERNARY_DECODE_CACHE=0 when compiling disassem.c to disable caching.
  *
  * @param
  * @return
