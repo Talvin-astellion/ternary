@@ -85,6 +85,9 @@ Arithmetic flags derive parity by collapsing every trit to one nonzero bit and
 using the compiler's parity builtin instead of walking the 27 trits.  A
 differential test checks the resulting P flag over random defined-trit words.
 
+Trace taint events are produced only while a trace file is open; otherwise the
+register-mask scan is skipped even when taint tracking itself is enabled.
+
 For assembled guest workloads, run `make -C asm bench BENCH_RUNS=5`.  This builds
 `emu/bench-guest` and measures only CPU execution, excluding image loading and
 reset.  Each run starts with a fresh image, must reach HALT within `BENCH_LIMIT`

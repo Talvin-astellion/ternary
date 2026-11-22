@@ -741,7 +741,10 @@ void runCPU( TriCpu* cpu, int cycles )
         }
 
         taintStepAfter( cpu );
-        traceSetTaint( taintRegMask(), taintMemCount() );
+        if( traceEnabled() )
+        {
+            traceSetTaint( taintRegMask(), taintMemCount() );
+        }
         symStep( cpu, rawInst );
     }
 }
