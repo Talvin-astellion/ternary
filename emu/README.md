@@ -70,11 +70,11 @@ decoder, including its low-eleven-trit address wrapping and bounds checks.
 The core tests exhaust all 22-bit address encodings against the general
 conversion, including undefined trits and high-bit aliases.
 
-Balanced-ternary addition stops scanning once the carry is clear and the
-remaining trits of the second operand are zero, so PC, clock and small-address
-increments do not touch all 32 trits.  A differential test compares the fast
-path against a reference adder over random operands, undefined-trit encodings
-and long carry chains.
+Balanced-ternary addition and carry addition stop scanning once the carry is
+clear and the remaining trits of the second operand are zero, so PC, clock and
+small-address increments do not touch all 32 trits.  Differential tests compare
+both fast paths against reference adders over random operands, undefined-trit
+encodings, all carry inputs and long carry chains.
 
 Register reads skip the tritwise modifier gate when it is the identity
 (`OPMOD_NOP`) and the value contains no undefined trits; undefined trits would

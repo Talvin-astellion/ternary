@@ -421,6 +421,96 @@ static void testAddFastPath( void )
     }
 }
 
+static trint32_t referenceAdc( trint32_t op1, trint32_t op2, trit_t* carry )
+{
+    static const uint8_t sums[7] = { 0, 1, 3, 0, 1, 3, 0 };
+    static const int8_t carries[7] = { -1, -1, 0, 0, 0, 1, 1 };
+    trint32_t result = 0;
+    int carryin = ( *carry == N ) ? -1 : (int)*carry;
+    unsigned shift;
+
+    if( carryin == 2 )
+    {
+        carryin = 0;
+    }
+    for( shift = 0; shift < BITS_PER_TRINT32_T; shift += BITS_PER_TRIT )
+    {
+        unsigned a = ( op1 >> shift ) & TRIT_MASK;
+        unsigned b = ( op2 >> shift ) & TRIT_MASK;
+        int sum;
+        if( a == 2 || b == 2 )
+        {
+            result |= (trint32_t)2 << shift;
+            carryin = 0;
+            continue;
+        }
+        sum = ( ( a == N ) ? -1 : (int)a ) +
+              ( ( b == N ) ? -1 : (int)b ) + carryin;
+        result |= (trint32_t)sums[sum + 3] << shift;
+        carryin = carries[sum + 3];
+    }
+    *carry = ( carryin < 0 ) ? N : (trit_t)carryin;
+    return result;
+}
+
+static void checkAdc( trint32_t a, trint32_t b, trit_t carry )
+{
+    trit_t actualCarry = carry;
+    trit_t expectedCarry = carry;
+    trint32_t actual = ternaryADC( a, b, &actualCarry );
+    trint32_t expected = referenceAdc( a, b, &expectedCarry );
+    CHECK( actual == expected );
+    CHECK( actualCarry == expectedCarry );
+}
+
+static void testAdcFastPath( void )
+{
+    static const trint32_t edge[] = {
+        0, 1, 2, TRIWORD_MASK, UINT64_MAX,
+        UINT64_C(0xAAAAAAAAAAAAAAAA), UINT64_C(0x5555555555555555),
+        UINT64_C(0xFFFFFFFFFFFFFFFF), UINT64_C(0x4000000000000000),
+    };
+    static const trit_t carryValues[] = { 0, 1, N, 2 };
+    static const trint32_t constants[] = { 0, 1, 2, 4, 7, 13, -1, -4 };
+    uint64_t state = UINT64_C(0x452821e638d01377);
+    unsigned i, j, k;
+
+    for( i = 0; i < sizeof( edge ) / sizeof( edge[0] ); ++i )
+    {
+        for( j = 0; j < sizeof( edge ) / sizeof( edge[0] ); ++j )
+        {
+            for( k = 0; k < sizeof( carryValues ) / sizeof( carryValues[0] ); ++k )
+            {
+                checkAdc( edge[i], edge[j], carryValues[k] );
+            }
+        }
+    }
+    for( i = 0; i < 200000; ++i )
+    {
+        trint32_t a = nextRandom( &state );
+        trint32_t b = nextRandom( &state );
+        trit_t carry = carryValues[i % 4];
+        checkAdc( a, b, carry );
+        checkAdc( a, ternaryFromInt64( constants[i % 8] ), carry );
+        checkAdc( ternaryFromInt64( constants[( i + 3 ) % 8] ), b, carry );
+    }
+
+    {
+        int64_t pow3 = 1;
+        for( i = 1; i <= TRITS_PER_TRINT32_T; ++i )
+        {
+            trint32_t ones;
+            trint32_t minusOnes;
+            pow3 *= 3;
+            ones = ternaryFromInt64( ( pow3 - 1 ) / 2 );
+            minusOnes = ternaryFromInt64( -( ( pow3 - 1 ) / 2 ) );
+            checkAdc( ones, ones, 0 );
+            checkAdc( ones, ones, 1 );
+            checkAdc( minusOnes, minusOnes, N );
+        }
+    }
+}
+
 static trit_t referenceParity( TriWord val )
 {
     int nonzero = 0;
@@ -542,6 +632,7 @@ int main( void )
     testTraps();
     testWordWidthAndFlags();
     testAddFastPath();
+    testAdcFastPath();
     testParityFlag();
     testAddCarry();
 

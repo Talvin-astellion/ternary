@@ -539,9 +539,20 @@ trint32_t ternaryADC  ( trint32_t op1, trint32_t op2, trit_t* carry )
 
     for(shift=0; shift<BITS_PER_TRINT32_T; shift+=BITS_PER_TRIT)
     {
-        unsigned a=(op1 >> shift) & TRIT_MASK;
-        unsigned b=(op2 >> shift) & TRIT_MASK;
+        unsigned a;
+        unsigned b;
         int sum;
+
+        /* Same shortcut as ternaryADD: a clear carry and no remaining op2
+         * bits leave the high trits of op1 untouched. */
+        if( carryin == 0 && ( op2 >> shift ) == 0 )
+        {
+            result |= op1 & ~( ( (trint32_t)1 << shift ) - 1 );
+            break;
+        }
+
+        a=(op1 >> shift) & TRIT_MASK;
+        b=(op2 >> shift) & TRIT_MASK;
 
         if(a==2 || b==2)
         {
