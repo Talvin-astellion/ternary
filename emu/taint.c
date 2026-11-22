@@ -3,7 +3,6 @@
 #include "mem.h"
 
 #include <stdlib.h>
-#include <string.h>
 
 typedef struct
 {
@@ -22,6 +21,8 @@ static uint8_t* regTaint = NULL;
 static uint8_t* memTaint = NULL;
 static unsigned long memTaintCount = 0;
 static PendingReg pendingReg[NUM_TRIREGS];
+static Tryte pendingRegIndex[8];
+static unsigned pendingRegCount = 0;
 static PendingMem pendingMem[8];
 static unsigned pendingMemCount = 0;
 
@@ -174,7 +175,14 @@ static void pendReg( Tryte reg, uint8_t taint )
 {
     if( validReg( reg ) && reg != 0 )
     {
-        pendingReg[reg].set = 1;
+        if( !pendingReg[reg].set )
+        {
+            if( pendingRegCount < sizeof( pendingRegIndex ) / sizeof( pendingRegIndex[0] ) )
+            {
+                pendingRegIndex[pendingRegCount++] = reg;
+            }
+            pendingReg[reg].set = 1;
+        }
         pendingReg[reg].taint = taint;
     }
 }
@@ -217,7 +225,7 @@ void taintStepBefore( TriCpu* cpu, TriWord inst )
     {
         return;
     }
-    memset( pendingReg, 0, sizeof( pendingReg ) );
+    pendingRegCount = 0;
     pendingMemCount = 0;
     parseInstruction( &fields, inst );
 
@@ -317,13 +325,13 @@ void taintStepAfter( TriCpu* cpu )
     {
         return;
     }
-    for( i = 0; i < NUM_TRIREGS; ++i )
+    for( i = 0; i < pendingRegCount; ++i )
     {
-        if( pendingReg[i].set )
-        {
-            regTaint[i] = pendingReg[i].taint;
-        }
+        Tryte reg = pendingRegIndex[i];
+        regTaint[reg] = pendingReg[reg].taint;
+        pendingReg[reg].set = 0;
     }
+    pendingRegCount = 0;
     for( i = 0; i < pendingMemCount; ++i )
     {
         int64_t index = pendingMem[i].index;

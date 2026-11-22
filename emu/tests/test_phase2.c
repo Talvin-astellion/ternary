@@ -50,6 +50,28 @@ static void testTaintAdd( void )
     taintShutdown();
 }
 
+static void testTaintPendingList( void )
+{
+    TriCpu cpu;
+    setup( &cpu );
+    CHECK( taintInit() == 0 );
+    taintMarkReg( REG_P02 );
+    WriteTriWord( &cpu, 0,
+                  makeInstruction( OPCODE_RTL, REG_P01, REG_P02, REG_P03 ) );
+    WriteTriWord( &cpu, ternaryFromInt64( 3 ), OPCODE_NOP );
+
+    runCPU( &cpu, 1 );
+    CHECK( taintReg( REG_P01 ) == 1 );
+    CHECK( taintReg( REG_P02 ) == 1 );
+    CHECK( taintReg( REG_P03 ) == 0 );
+
+    /* The next instruction must not replay the previous pending writes. */
+    runCPU( &cpu, 1 );
+    CHECK( taintReg( REG_P01 ) == 1 );
+    CHECK( taintReg( REG_P04 ) == 0 );
+    taintShutdown();
+}
+
 static void testTaintMemory( void )
 {
     TriCpu cpu;
@@ -161,6 +183,7 @@ static void testSymbolic( void )
 int main( void )
 {
     testTaintAdd();
+    testTaintPendingList();
     testTaintMemory();
     testTaintAddressAliases();
     testTraceFile();

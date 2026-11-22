@@ -88,6 +88,10 @@ differential test checks the resulting P flag over random defined-trit words.
 Trace taint events are produced only while a trace file is open; otherwise the
 register-mask scan is skipped even when taint tracking itself is enabled.
 
+Taint propagation records only the registers pending in the current instruction
+instead of clearing and scanning all 64 registers.  A phase-2 test checks RTL
+writes to two registers and confirms the next instruction does not replay them.
+
 Immediate expansion converts only the three selector trits instead of the full
 word.  It stays out of line so the decode-cache hit path keeps its compact
 shape; a differential test checks expanded 11- and 9-trit fields.
