@@ -421,6 +421,81 @@ static void testAddFastPath( void )
     }
 }
 
+static trit_t referenceParity( TriWord val )
+{
+    int nonzero = 0;
+    int i;
+    if( ( val & TRIWORD_MASK ) == 0 )
+    {
+        return 0;
+    }
+    for( i = 0; i < TRITS_PER_WORD; ++i )
+    {
+        if( ( ( val >> ( i * BITS_PER_TRIT ) ) & TRIT_MASK ) != 0 )
+        {
+            nonzero = !nonzero;
+        }
+    }
+    return nonzero ? N : 1;
+}
+
+static TriWord randomDefinedTriWord( uint64_t* state )
+{
+    TriWord val = 0;
+    int i;
+    for( i = 0; i < TRITS_PER_WORD; ++i )
+    {
+        unsigned choice = (unsigned)( nextRandom( state ) % 3 );
+        trit_t t = ( choice == 2 ) ? N : (trit_t)choice;
+        val |= (TriWord)t << ( i * BITS_PER_TRIT );
+    }
+    return val;
+}
+
+static void testParityFlag( void )
+{
+    TriCpu cpu;
+    TriWord inst = makeRegInstruction( OPCODE_ADD, REG_P01, REG_P02, REG_P03 );
+    uint64_t state = UINT64_C(0x243f6a8885a308d3);
+    unsigned i;
+
+    resetMem();
+    resetCPU( &cpu );
+    WriteTriWord( &cpu, 0, inst );
+
+    for( i = 0; i < 20000; ++i )
+    {
+        FlagReg flags;
+        TriWord v = randomDefinedTriWord( &state );
+        cpu.regs[REG_PC] = 0;
+        cpu.regs[REG_FLAGS] = 0;
+        cpu.regs[REG_P02] = v;
+        cpu.regs[REG_P03] = 0;
+        runCPU( &cpu, 1 );
+        flags.val = cpu.regs[REG_FLAGS];
+        CHECK( flags.flags.P == referenceParity( v ) );
+    }
+
+    {
+        static const TriWord values[] = {
+            0, 1, TRIWORD_MASK,
+            ( (TriWord)1 << ( 2 * BITS_PER_TRIT ) ) |
+            ( (TriWord)1 << ( 5 * BITS_PER_TRIT ) ),
+        };
+        for( i = 0; i < sizeof( values ) / sizeof( values[0] ); ++i )
+        {
+            FlagReg flags;
+            cpu.regs[REG_PC] = 0;
+            cpu.regs[REG_FLAGS] = 0;
+            cpu.regs[REG_P02] = values[i];
+            cpu.regs[REG_P03] = 0;
+            runCPU( &cpu, 1 );
+            flags.val = cpu.regs[REG_FLAGS];
+            CHECK( flags.flags.P == referenceParity( values[i] ) );
+        }
+    }
+}
+
 static void testAddCarry( void )
 {
     TriCpu cpu;
@@ -467,6 +542,7 @@ int main( void )
     testTraps();
     testWordWidthAndFlags();
     testAddFastPath();
+    testParityFlag();
     testAddCarry();
 
     if( failures != 0 )

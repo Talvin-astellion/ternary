@@ -81,6 +81,10 @@ Register reads skip the tritwise modifier gate when it is the identity
 otherwise be mapped to zero.  Tests cover both trit kinds and confirm that the
 shift modifier is applied before the identity check.
 
+Arithmetic flags derive parity by collapsing every trit to one nonzero bit and
+using the compiler's parity builtin instead of walking the 27 trits.  A
+differential test checks the resulting P flag over random defined-trit words.
+
 For assembled guest workloads, run `make -C asm bench BENCH_RUNS=5`.  This builds
 `emu/bench-guest` and measures only CPU execution, excluding image loading and
 reset.  Each run starts with a fresh image, must reach HALT within `BENCH_LIMIT`

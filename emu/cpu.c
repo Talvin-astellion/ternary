@@ -146,20 +146,15 @@ static trit_t addOverflow( TriWord full )
 
 static trit_t tritParity( TriWord val )
 {
-    int nonzero = 0;
-    int i;
-    if( ( val & TRIWORD_MASK ) == 0 )
+    /* Collapse each 2-bit trit to its low bit, which is set exactly for a
+     * nonzero trit, then take the parity of the 27 resulting bits. */
+    uint64_t nonzero = ( val | ( val >> 1 ) ) &
+                       UINT64_C(0x5555555555555555) & TRIWORD_MASK;
+    if( nonzero == 0 )
     {
         return 0;
     }
-    for( i = 0; i < TRITS_PER_WORD; ++i )
-    {
-        if( ( ( val >> ( i * BITS_PER_TRIT ) ) & TRIT_MASK ) != 0 )
-        {
-            nonzero = !nonzero;
-        }
-    }
-    return nonzero ? N : 1;
+    return __builtin_parityll( nonzero ) ? N : 1;
 }
 
 static void setResultFlags( TriCpu* cpu, TriWord val, trit_t carry,
