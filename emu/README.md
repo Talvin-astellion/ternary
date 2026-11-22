@@ -63,6 +63,12 @@ To profile either version directly, use `emu/bench-cpu [N]` or
 `emu/bench-cpu-uncached [N]`.  The latter is compiled with
 `-DTERNARY_DECODE_CACHE=0`, which can also disable caching in a normal build.
 
+RAM address decoding uses a 64-byte lookup table for three-trit chunks instead
+of converting a full 32-trit number.  Memory and taint tracking share this
+decoder, including its low-eleven-trit address wrapping and bounds checks.
+The core tests exhaust all 22-bit address encodings against the general
+conversion, including undefined trits and high-bit aliases.
+
 ## Monitor
 
 ```sh

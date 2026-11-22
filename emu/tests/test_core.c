@@ -81,6 +81,44 @@ static void testMemory( void )
     CHECK( ternary2int( ReadAddr( 0 ) ) == 0 );
 }
 
+static void testRamAddressDecoder( void )
+{
+    uint32_t bits;
+    int64_t index;
+    TriWord low = ternaryFromInt64( -BASE_OFFSET );
+    TriWord high = ternaryFromInt64( BASE_OFFSET );
+
+    /* Exhaust every 22-bit encoding, including undefined trits, against the old decoder. */
+    for( bits = 0; bits <= RAM_ADDR_MASK; ++bits )
+    {
+        int64_t expected = BASE_OFFSET + ternary2int( bits );
+        int valid = expected >= 0 && expected < RAM_SIZE;
+        CHECK( ramIndex( bits, &index ) == ( valid ? 0 : -1 ) );
+        if( valid )
+        {
+            CHECK( index == expected );
+        }
+        CHECK( ramIndex( bits | ~(TriWord)RAM_ADDR_MASK, &index ) == ( valid ? 0 : -1 ) );
+        if( valid )
+        {
+            CHECK( index == expected );
+        }
+    }
+
+    resetMem();
+    WriteAddr( low, 1 );
+    WriteAddr( high, N );
+    CHECK( ReadAddr( low ) == 1 );
+    CHECK( ReadAddr( high ) == N );
+    CHECK( ReadRamTryte( ternaryFromInt64( -BASE_OFFSET - RAM_SIZE ) ) == 1 );
+    CHECK( ReadRamTryte( ternaryFromInt64( BASE_OFFSET + RAM_SIZE ) ) == N );
+
+    /* An MMIO address's RAM alias must remain RAM, not access the device. */
+    WriteAddr( ternaryFromInt64( RAM_SIZE - 26 ), 1 );
+    CHECK( ReadRamTryte( ADDR_UART_STATUS ) == 1 );
+    CHECK( ReadAddr( ternaryFromInt64( RAM_SIZE - 26 ) ) == 1 );
+}
+
 static TriWord makeRegInstruction( TriOpcode opcode, TriReg r1, TriReg r2,
                                    TriReg r3 )
 {
@@ -312,6 +350,7 @@ int main( void )
     testRotatePair();
     testRegisterValidation();
     testMemory();
+    testRamAddressDecoder();
     testDecode();
     testInstructionRewrite();
     testHaltAndClock();

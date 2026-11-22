@@ -76,6 +76,20 @@ static void testTaintMemory( void )
     taintShutdown();
 }
 
+static void testTaintAddressAliases( void )
+{
+    CHECK( taintInit() == 0 );
+    taintMarkMem( ternaryFromInt64( -BASE_OFFSET ) );
+    CHECK( taintMem( ternaryFromInt64( -BASE_OFFSET - RAM_SIZE ) ) == 1 );
+    CHECK( taintMem( ternaryFromInt64( BASE_OFFSET ) ) == 0 );
+    taintMarkMem( ternaryFromInt64( RAM_SIZE + BASE_OFFSET ) );
+    CHECK( taintMem( ternaryFromInt64( BASE_OFFSET ) ) == 1 );
+    CHECK( taintMemCount() == 2 );
+    taintMarkMem( ternaryFromInt64( BASE_OFFSET ) );
+    CHECK( taintMemCount() == 2 );
+    taintShutdown();
+}
+
 static void testTraceFile( void )
 {
     TriCpu cpu;
@@ -148,6 +162,7 @@ int main( void )
 {
     testTaintAdd();
     testTaintMemory();
+    testTaintAddressAliases();
     testTraceFile();
     testSymbolic();
 

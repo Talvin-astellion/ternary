@@ -42,18 +42,6 @@ static int validReg( Tryte reg )
     return 1;
 }
 
-static int memIndex( TriWord addr, int64_t* index )
-{
-    int64_t offset = ternary2int( (trint32_t)( addr & RAM_ADDR_MASK ) );
-    int64_t idx = BASE_OFFSET + offset;
-    if( idx < 0 || idx >= RAM_SIZE )
-    {
-        return -1;
-    }
-    *index = idx;
-    return 0;
-}
-
 int taintInit( void )
 {
     taintShutdown();
@@ -100,7 +88,7 @@ void taintMarkReg( Tryte reg )
 void taintMarkMem( TriWord addr )
 {
     int64_t index;
-    if( taintOn && memTaint != NULL && memIndex( addr, &index ) == 0 )
+    if( taintOn && memTaint != NULL && ramIndex( addr, &index ) == 0 )
     {
         if( !memTaint[index] )
         {
@@ -122,7 +110,7 @@ int taintReg( Tryte reg )
 int taintMem( TriWord addr )
 {
     int64_t index;
-    if( !taintOn || memTaint == NULL || memIndex( addr, &index ) != 0 )
+    if( !taintOn || memTaint == NULL || ramIndex( addr, &index ) != 0 )
     {
         return 0;
     }
@@ -161,7 +149,7 @@ static uint8_t regT( TriCpu* cpu, Tryte reg )
 static uint8_t memT( TriWord addr )
 {
     int64_t index;
-    if( !taintOn || memTaint == NULL || memIndex( addr, &index ) != 0 )
+    if( !taintOn || memTaint == NULL || ramIndex( addr, &index ) != 0 )
     {
         return 0;
     }
@@ -198,7 +186,7 @@ static void pendMem( TriWord addr, uint8_t taint )
     {
         return;
     }
-    if( memIndex( addr, &index ) == 0 )
+    if( ramIndex( addr, &index ) == 0 )
     {
         pendingMem[pendingMemCount].index = index;
         pendingMem[pendingMemCount].taint = taint;

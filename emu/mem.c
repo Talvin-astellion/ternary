@@ -106,9 +106,19 @@ static int tryte2ascii( Tryte val )
  * Map an address to an index in the RAM array.  Only the low eleven trits are
  * used as an offset, mirroring the address decoder.
  */
-static int ramIndex( TriWord addr, int64_t* index )
+int ramIndex( TriWord addr, int64_t* index )
 {
-    int64_t offset = ternary2int( (trint32_t)( addr & RAM_ADDR_MASK ) );
+    /* Three-trit chunks, including the legacy numeric value +2 for code 10. */
+    static const int8_t chunk[64] = {
+          0,   1,   2,  -1,   3,   4,   5,   2,   6,   7,   8,   5,  -3,  -2,  -1,  -4,
+          9,  10,  11,   8,  12,  13,  14,  11,  15,  16,  17,  14,   6,   7,   8,   5,
+         18,  19,  20,  17,  21,  22,  23,  20,  24,  25,  26,  23,  15,  16,  17,  14,
+         -9,  -8,  -7, -10,  -6,  -5,  -4,  -7,  -3,  -2,  -1,  -4, -12, -11, -10, -13
+    };
+    int64_t offset = chunk[addr & 0x3F] +
+                     27 * chunk[( addr >> 6 ) & 0x3F] +
+                     729 * chunk[( addr >> 12 ) & 0x3F] +
+                     19683 * chunk[( addr >> 18 ) & 0x0F];
     int64_t idx = BASE_OFFSET + offset;
     if( idx < 0 || idx >= RAM_SIZE )
     {
@@ -379,5 +389,4 @@ int readFileIntoMem(FILE* fin, const char* fname, int verbose)
     }
 }
 /*****************************************************************************/
-
 

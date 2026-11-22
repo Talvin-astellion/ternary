@@ -100,6 +100,9 @@ extern Tryte ReadAddr(TriWord addr);
 
 extern Tryte ReadRamTryte(TriWord addr);
 
+/** Map the low eleven address trits to RAM; return -1 for an out-of-range offset. */
+extern int ramIndex( TriWord addr, int64_t* index );
+
 /**
  * [Description]
  *
