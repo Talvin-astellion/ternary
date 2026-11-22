@@ -421,6 +421,67 @@ static void testAddFastPath( void )
     }
 }
 
+static TriWord referenceExpandImmediate( TriWord input )
+{
+    if( 0b00111111 == input )
+    {
+        return (-1LL) & TRIWORD_MASK;
+    }
+    if( 0b00010101 == input )
+    {
+        return 0b00010101010101010101010101010101010101010101010101010101ULL;
+    }
+    {
+        int shift = ( ternary2int( input & 0b00111111 ) + 13 ) * 2;
+        input >>= 6;
+        return ( input << shift ) & TRIWORD_MASK;
+    }
+}
+
+static void testImmediateExpansion( void )
+{
+    TriOpInstruction fields;
+    uint64_t state = UINT64_C(0x13198a2e03707344);
+    unsigned i;
+
+    for( i = 0; i < 50000; ++i )
+    {
+        TriWord base = nextRandom( &state );
+        TriWord field = nextRandom( &state ) & UINT64_C(0x003FFFFF);
+        TriWord trits = 0;
+        unsigned k;
+
+        for( k = 0; k < 3; ++k )
+        {
+            unsigned choice = (unsigned)( nextRandom( &state ) % 3 );
+            trit_t t = ( choice == 2 ) ? N : (trit_t)choice;
+            trits |= (TriWord)t << ( k * BITS_PER_TRIT );
+        }
+        field = ( field & ~UINT64_C(0x3F) ) | trits;
+
+        {
+            TriWord inst = ( base & ~( UINT64_C(0x3FFFFF) << 32 ) ) |
+                           ( field << 32 );
+            parseInstruction( &fields, inst );
+            CHECK( fields.imm11 == referenceExpandImmediate( field ) );
+        }
+        {
+            TriWord field18 = field & UINT64_C(0x3FFFF);
+            TriWord inst = ( base & ~( UINT64_C(0x3FFFF) << 18 ) ) |
+                           ( field18 << 18 );
+            parseInstruction( &fields, inst );
+            CHECK( fields.imm9_1 == referenceExpandImmediate( field18 ) );
+        }
+        {
+            TriWord field18 = field & UINT64_C(0x3FFFF);
+            TriWord inst = ( base & ~( UINT64_C(0x3FFFF) << 36 ) ) |
+                           ( field18 << 36 );
+            parseInstruction( &fields, inst );
+            CHECK( fields.imm9_2 == referenceExpandImmediate( field18 ) );
+        }
+    }
+}
+
 static trint32_t referenceAdc( trint32_t op1, trint32_t op2, trit_t* carry )
 {
     static const uint8_t sums[7] = { 0, 1, 3, 0, 1, 3, 0 };
@@ -627,6 +688,7 @@ int main( void )
     testMemory();
     testRamAddressDecoder();
     testDecode();
+    testImmediateExpansion();
     testInstructionRewrite();
     testHaltAndClock();
     testTraps();

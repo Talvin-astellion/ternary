@@ -62,7 +62,21 @@ static DecodeCacheEntry decodeCache[1U << DECODE_CACHE_BITS];
  * @param
  * @return
  */
-static TriWord expandImmediate( TriWord input )
+static int immediateShiftValue( TriWord input )
+{
+    int total = 0;
+    int i;
+    /* Only the three low trits select the shift amount.  Decode the
+     * undefined trit pattern as zero so the shift always stays in range. */
+    for( i = 2; i >= 0; --i )
+    {
+        unsigned t = ( input >> ( i * BITS_PER_TRIT ) ) & TRIT_MASK;
+        total = total * 3 + ( ( t == 2 ) ? 0 : trit2int( (trit_t)t ) );
+    }
+    return total;
+}
+
+static __attribute__((noinline)) TriWord expandImmediate( TriWord input )
 {
     if( 0b00111111 == input )
     {
@@ -74,7 +88,7 @@ static TriWord expandImmediate( TriWord input )
     }
     else
     {
-        int shift = (ternary2int(input & 0b00111111) + 13) * 2;
+        int shift = (immediateShiftValue(input) + 13) * 2;
         input >>= 6;
         return (input << shift) & TRIWORD_MASK;
     }
