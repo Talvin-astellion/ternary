@@ -43,27 +43,27 @@ def load_jsonl(path):
     entries = []
     with open(path, "r", encoding="utf-8") as handle:
         for lineno, line in enumerate(handle, 1):
-            line = line.strip()
-            if not line:
-                continue
+            if not line.endswith("\n"):
+                raise ValueError("{}:{}: incomplete JSONL record".format(path, lineno))
             try:
                 entry = json.loads(line)
             except json.JSONDecodeError as exc:
-                print("{}:{}: invalid JSON: {}".format(path, lineno, exc),
-                      file=sys.stderr)
-                continue
+                raise ValueError("{}:{}: invalid JSON: {}".format(path, lineno, exc)) from exc
+            if not isinstance(entry, dict):
+                raise ValueError("{}:{}: expected a JSON object".format(path, lineno))
             entries.append(entry)
     return entries
 
 
 def verify_chain(entries):
     expected_prev = "0" * 64
+    expected_seq = 0
     errors = []
     for entry in entries:
         if "hash" not in entry and "prev_hash" not in entry:
             continue
-        if entry.get("seq") == 0:
-            expected_prev = "0" * 64
+        if entry.get("seq") != expected_seq:
+            errors.append("seq {}: expected {}".format(entry.get("seq"), expected_seq))
         prev = entry.get("prev_hash")
         if prev != expected_prev:
             errors.append("seq {}: prev_hash mismatch".format(entry.get("seq")))
@@ -71,6 +71,7 @@ def verify_chain(entries):
         if entry.get("hash") != digest:
             errors.append("seq {}: hash mismatch".format(entry.get("seq")))
         expected_prev = entry.get("hash", "")
+        expected_seq += 1
     return len(errors) == 0, errors
 
 
@@ -153,7 +154,11 @@ def main(argv=None):
                         help="emit a JSON summary instead of text")
     args = parser.parse_args(argv)
 
-    summary = summarize(args.paths)
+    try:
+        summary = summarize(args.paths)
+    except (OSError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     if args.json:
         print(json.dumps(summary, indent=2, sort_keys=True))
     else:

@@ -264,7 +264,7 @@ int main( int argc, char** argv )
     {
         if( tmlInit( &tml, &policy, 1 ) != 0 )
         {
-            fprintf( stderr, "Unable to open TML Always Memory log: %s\n",
+            fprintf( stderr, "Unable to open or verify TML Always Memory log: %s\n",
                      policy.log_path );
             return 2;
         }

@@ -19,6 +19,7 @@ typedef struct
     int enabled;
 } TmlLog;
 
+/* Verify an existing emulator JSONL log and restore its head before appending. */
 int tmlLogOpen( TmlLog* log, const char* path );
 void tmlLogClose( TmlLog* log );
 int tmlLogAppend( TmlLog* log,

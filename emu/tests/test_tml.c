@@ -133,6 +133,168 @@ static void testTmlLifecycle( void )
     tmlShutdown( &tml );
     CHECK( fileLines( path ) >= 8 );
     CHECK( fileContains( path, "\"event\":\"freeze\"" ) );
+    {
+        unsigned long count = tml.log.count;
+        char head[TML_HASH_HEX];
+        snprintf( head, sizeof( head ), "%s", tml.log.head_hash );
+        CHECK( tmlInit( &tml, &policy, 1 ) == 0 );
+        CHECK( tml.log.count == count );
+        CHECK( strcmp( tml.log.head_hash, head ) == 0 );
+        CHECK( tmlBootCheck( &tml ) == 0 );
+        tmlShutdown( &tml );
+        CHECK( tml.log.count == count + 3 );
+        CHECK( fileLines( path ) == (long)tml.log.count );
+    }
+    remove( path );
+}
+
+static void testLogResume( void )
+{
+    TmlLog log;
+    TriWord args[3] = { 0, TRIWORD_MASK, UINT64_MAX };
+    char path[256];
+    char head[TML_HASH_HEX];
+    char longText[1024];
+    Tryte headTryte;
+
+    snprintf( path, sizeof( path ), "/tmp/tml_resume_%ld.jsonl", (long)getpid() );
+    remove( path );
+    CHECK( tmlLogOpen( &log, path ) == 0 );
+    CHECK( log.count == 0 );
+    args[0] = ternaryFromInt64( -42 );
+    CHECK( tmlLogAppend( &log, "event\"\\\n", "quoted \"detail\"\\\n\tжурнал",
+                         -1, 7, 2, UINT64_MAX, args ) == 0 );
+    memset( longText, '\\', sizeof( longText ) - 1 );
+    longText[sizeof( longText ) - 1] = '\0';
+    CHECK( tmlLogAppend( &log, longText, longText, 1, 0, 1, 0, args ) == 0 );
+    snprintf( head, sizeof( head ), "%s", log.head_hash );
+    headTryte = log.head_tryte;
+    tmlLogClose( &log );
+
+    CHECK( tmlLogOpen( &log, path ) == 0 );
+    CHECK( log.count == 2 );
+    CHECK( strcmp( log.head_hash, head ) == 0 );
+    CHECK( strcmp( log.prev_hash, head ) == 0 );
+    CHECK( log.head_tryte == headTryte );
+    CHECK( tmlLogAppend( &log, NULL, NULL, 0, 0, 0, 0, args ) == 0 );
+    tmlLogClose( &log );
+    CHECK( tmlLogOpen( &log, path ) == 0 );
+    CHECK( log.count == 3 );
+    tmlLogClose( &log );
+    remove( path );
+}
+
+static void rejectLog( const char* path, const char* contents, size_t size )
+{
+    TmlLog log;
+    char actual[8192];
+    FILE* file = fopen( path, "wb" );
+    CHECK( file != NULL );
+    if( file == NULL )
+    {
+        return;
+    }
+    CHECK( fwrite( contents, 1, size, file ) == size );
+    fclose( file );
+    CHECK( tmlLogOpen( &log, path ) != 0 );
+    CHECK( log.file == NULL );
+    CHECK( log.enabled == 0 );
+    tmlLogClose( &log );
+    file = fopen( path, "rb" );
+    CHECK( file != NULL );
+    if( file != NULL )
+    {
+        CHECK( fread( actual, 1, sizeof( actual ), file ) == size );
+        CHECK( memcmp( actual, contents, size ) == 0 );
+        fclose( file );
+    }
+}
+
+static void testLogCorruption( void )
+{
+    TmlLog log;
+    TriWord args[3] = { 0, 0, 0 };
+    char path[256];
+    char original[4096];
+    char changed[8192];
+    const char* fields[] = { "\"risk\":", "\"seq\":", "\"prev_hash\":\"",
+                             "\"hash\":\"", "\"event\":\"" };
+    size_t length, firstLine;
+    unsigned i;
+    FILE* file;
+
+    snprintf( path, sizeof( path ), "/tmp/tml_corrupt_%ld.jsonl", (long)getpid() );
+    remove( path );
+    CHECK( tmlLogOpen( &log, path ) == 0 );
+    CHECK( tmlLogAppend( &log, "decision", "evidence", 1, 7, 1, 0, args ) == 0 );
+    CHECK( tmlLogAppend( &log, "decision", "evidence", 1, 7, 1, 0, args ) == 0 );
+    tmlLogClose( &log );
+    file = fopen( path, "rb" );
+    CHECK( file != NULL );
+    if( file == NULL )
+    {
+        return;
+    }
+    length = fread( original, 1, sizeof( original ) - 1, file );
+    fclose( file );
+    original[length] = '\0';
+    firstLine = (size_t)( strchr( original, '\n' ) - original ) + 1;
+
+    for( i = 0; i < sizeof( fields ) / sizeof( fields[0] ); ++i )
+    {
+        char* p;
+        memcpy( changed, original, length + 1 );
+        p = strstr( changed, fields[i] );
+        CHECK( p != NULL );
+        if( p != NULL )
+        {
+            p += strlen( fields[i] );
+            *p = *p == '0' ? '1' : '0';
+            rejectLog( path, changed, length );
+        }
+    }
+    rejectLog( path, original, length - 1 ); /* missing final newline */
+    memcpy( changed, original, length );
+    memcpy( changed + length, "{\"seq\":", 7 );
+    rejectLog( path, changed, length + 7 ); /* torn next record */
+    memcpy( changed + length, "{}\n", 3 );
+    rejectLog( path, changed, length + 3 ); /* missing fields */
+    memcpy( changed + length, original, firstLine );
+    rejectLog( path, changed, length + firstLine ); /* valid hash, restarted sequence */
+    memcpy( changed, original + firstLine, length - firstLine );
+    rejectLog( path, changed, length - firstLine ); /* deleted first record */
+    memcpy( changed, original, length );
+    changed[20] = '\0';
+    rejectLog( path, changed, length ); /* embedded NUL */
+    snprintf( changed, sizeof( changed ), "{\"seq\":184467440737095516160%s",
+              original + strlen( "{\"seq\":0" ) );
+    rejectLog( path, changed, strlen( changed ) ); /* numeric overflow */
+    memset( changed, 'x', 2200 );
+    changed[2200] = '\n';
+    rejectLog( path, changed, 2201 ); /* oversized record */
+    remove( path );
+}
+
+static void testLogWriteFailure( void )
+{
+    TmlLog log;
+    TriWord args[3] = { 0, 0, 0 };
+    char path[256];
+    snprintf( path, sizeof( path ), "/tmp/tml_io_%ld.jsonl", (long)getpid() );
+    remove( path );
+    CHECK( tmlLogOpen( &log, path ) == 0 );
+    fclose( log.file );
+    log.file = fopen( "/dev/full", "w" );
+    CHECK( log.file != NULL );
+    if( log.file != NULL )
+    {
+        CHECK( tmlLogAppend( &log, "decision", "write fails", 1, 0, 1, 0, args ) != 0 );
+        CHECK( log.count == 0 );
+        CHECK( log.enabled == 0 );
+        CHECK( strspn( log.head_hash, "0" ) == 64 );
+        CHECK( tmlLogAppend( &log, "decision", "still fails", 1, 0, 1, 0, args ) != 0 );
+        tmlLogClose( &log );
+    }
     remove( path );
 }
 
@@ -185,6 +347,9 @@ int main( void )
     testSha256();
     testPolicy();
     testTmlLifecycle();
+    testLogResume();
+    testLogCorruption();
+    testLogWriteFailure();
     testTaintCoupling();
     testDisabled();
 

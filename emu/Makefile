@@ -110,6 +110,10 @@ test: $(TESTBIN) $(TMLTESTBIN) $(PHASE2TESTBIN)
 	./$(TMLTESTBIN)
 	./$(PHASE2TESTBIN)
 
+.PHONY: test-tools
+test-tools: $(PKG)
+	python3 -m unittest discover -s ../tools/tests -v
+
 sanitize:
 	$(CC) -g -O1 -Wall -Wextra -fsanitize=address,undefined \
 		$(TEST_SRCS) -o $(TESTBIN)-san

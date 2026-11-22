@@ -104,7 +104,11 @@ def main(argv=None):
     parser.add_argument("-o", "--out", help="write report to this file")
     args = parser.parse_args(argv)
 
-    entries = load_jsonl(args.log)
+    try:
+        entries = load_jsonl(args.log)
+    except (OSError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     report = build_report(entries)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as handle:

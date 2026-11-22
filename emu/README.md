@@ -27,6 +27,7 @@ the analysis tools are optional Python 3 scripts.
 make -C emu                 # builds emu/tern-cpu-emu
 make -C emu test            # core, TML and trace/taint/symbolic tests
 make -C emu sanitize        # same tests with ASan and UBSan
+make -C emu test-tools      # Python verifier and cross-process log recovery tests
 make -C emu bench           # compare cached and uncached instruction decoding
 ```
 
@@ -131,6 +132,24 @@ BOOT -> ACTIVE -> SACRED_PAUSE -> FREEZE -> RECOVERY
 * A Type-0 anomaly (actuation without a logged decision) triggers `FREEZE`.
 * Every boot, decision, override, freeze and recovery is appended to Always
   Memory as JSONL with `prev_hash` / `hash` SHA-256 chaining.
+
+Opening an existing Always Memory file verifies every record's sequence number,
+previous hash and SHA-256 digest before enabling appends.  The next sequence
+number, head hash and MMIO head value are restored, so restarts continue one
+chain.  Verification is a streaming scan with bounded memory; startup time is
+linear in the log size.  It accepts the emulator's emitted JSONL format,
+including escaped strings and its existing canonical hash representation.
+
+A malformed or incomplete record, sequence discontinuity or hash mismatch makes
+initialization fail without changing the file.  This includes older files
+containing multiple chains restarted at sequence zero.  A failed write or flush
+leaves the in-memory head unchanged and disables further appends on that handle.
+The analysis tools
+also require continuous sequence numbers instead of accepting a new sequence
+zero as a chain reset.
+
+Malformed JSONL and incomplete final lines are errors in the Python analysis
+tools as well; they are not skipped when producing a chain status or report.
 
 ### MMIO
 

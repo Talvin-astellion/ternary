@@ -28,5 +28,8 @@ jobs:
       - name: Emulator tests
         run: make -C emu test
 
+      - name: Log recovery and analysis tests
+        run: make -C emu test-tools
+
       - name: Emulator sanitizer tests
         run: make -C emu sanitize
