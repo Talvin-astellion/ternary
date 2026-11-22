@@ -496,9 +496,20 @@ trint32_t ternaryADD  ( trint32_t op1, trint32_t op2 )
 
     for(shift=0; shift<BITS_PER_TRINT32_T; shift+=BITS_PER_TRIT)
     {
-        unsigned a=(op1 >> shift) & TRIT_MASK;
-        unsigned b=(op2 >> shift) & TRIT_MASK;
+        unsigned a;
+        unsigned b;
         int sum;
+
+        /* Once the carry is clear and op2 has no remaining bits, the high
+         * trits of op1 pass through unchanged (including undefined trits). */
+        if( carry == 0 && ( op2 >> shift ) == 0 )
+        {
+            result |= op1 & ~( ( (trint32_t)1 << shift ) - 1 );
+            break;
+        }
+
+        a=(op1 >> shift) & TRIT_MASK;
+        b=(op2 >> shift) & TRIT_MASK;
 
         if(a==2 || b==2)
         {

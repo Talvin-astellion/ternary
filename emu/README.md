@@ -70,6 +70,12 @@ decoder, including its low-eleven-trit address wrapping and bounds checks.
 The core tests exhaust all 22-bit address encodings against the general
 conversion, including undefined trits and high-bit aliases.
 
+Balanced-ternary addition stops scanning once the carry is clear and the
+remaining trits of the second operand are zero, so PC, clock and small-address
+increments do not touch all 32 trits.  A differential test compares the fast
+path against a reference adder over random operands, undefined-trit encodings
+and long carry chains.
+
 For assembled guest workloads, run `make -C asm bench BENCH_RUNS=5`.  This builds
 `emu/bench-guest` and measures only CPU execution, excluding image loading and
 reset.  Each run starts with a fresh image, must reach HALT within `BENCH_LIMIT`

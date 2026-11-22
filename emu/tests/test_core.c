@@ -311,6 +311,101 @@ static void testWordWidthAndFlags( void )
     CHECK( flags.flags.P == N );
 }
 
+static trint32_t referenceAdd( trint32_t op1, trint32_t op2 )
+{
+    static const uint8_t sums[7] = { 0, 1, 3, 0, 1, 3, 0 };
+    static const int8_t carries[7] = { -1, -1, 0, 0, 0, 1, 1 };
+    trint32_t result = 0;
+    int carry = 0;
+    unsigned shift;
+
+    for( shift = 0; shift < BITS_PER_TRINT32_T; shift += BITS_PER_TRIT )
+    {
+        unsigned a = ( op1 >> shift ) & TRIT_MASK;
+        unsigned b = ( op2 >> shift ) & TRIT_MASK;
+        int sum;
+        if( a == 2 || b == 2 )
+        {
+            result |= (trint32_t)2 << shift;
+            carry = 0;
+            continue;
+        }
+        sum = ( ( a == N ) ? -1 : (int)a ) +
+              ( ( b == N ) ? -1 : (int)b ) + carry;
+        result |= (trint32_t)sums[sum + 3] << shift;
+        carry = carries[sum + 3];
+    }
+    return result;
+}
+
+static uint64_t nextRandom( uint64_t* state )
+{
+    uint64_t x = *state;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    *state = x;
+    return x;
+}
+
+static void testAddFastPath( void )
+{
+    static const trint32_t edge[] = {
+        0, 1, 2, TRIWORD_MASK, UINT64_MAX,
+        UINT64_C(0xAAAAAAAAAAAAAAAA), UINT64_C(0x5555555555555555),
+        UINT64_C(0xFFFFFFFFFFFFFFFF), UINT64_C(0x4000000000000000),
+    };
+    static const int64_t values[] = {
+        0, 1, -1, 3, -3, 3812798742493LL, -3812798742493LL
+    };
+    static const trint32_t constants[] = { 0, 1, 2, 4, 7, 13, -1, -4 };
+    uint64_t state = UINT64_C(0x9e3779b97f4a7c15);
+    unsigned i, j;
+
+    for( i = 0; i < sizeof( edge ) / sizeof( edge[0] ); ++i )
+    {
+        for( j = 0; j < sizeof( edge ) / sizeof( edge[0] ); ++j )
+        {
+            CHECK( ternaryADD( edge[i], edge[j] ) == referenceAdd( edge[i], edge[j] ) );
+        }
+    }
+    for( i = 0; i < sizeof( values ) / sizeof( values[0] ); ++i )
+    {
+        trint32_t a = ternaryFromInt64( values[i] );
+        for( j = 0; j < sizeof( edge ) / sizeof( edge[0] ); ++j )
+        {
+            CHECK( ternaryADD( a, edge[j] ) == referenceAdd( a, edge[j] ) );
+            CHECK( ternaryADD( edge[j], a ) == referenceAdd( edge[j], a ) );
+        }
+    }
+    for( i = 0; i < 200000; ++i )
+    {
+        trint32_t a = nextRandom( &state );
+        trint32_t b = nextRandom( &state );
+        CHECK( ternaryADD( a, b ) == referenceAdd( a, b ) );
+        CHECK( ternaryADD( a, ternaryFromInt64( constants[i % 8] ) ) ==
+               referenceAdd( a, ternaryFromInt64( constants[i % 8] ) ) );
+        CHECK( ternaryADD( ternaryFromInt64( constants[( i + 3 ) % 8] ), b ) ==
+               referenceAdd( ternaryFromInt64( constants[( i + 3 ) % 8] ), b ) );
+    }
+    /* Long carry chains must still propagate past the fast-path check. */
+    {
+        int64_t pow3 = 1;
+        for( i = 1; i <= TRITS_PER_TRINT32_T; ++i )
+        {
+            trint32_t ones;
+            trint32_t minusOnes;
+            pow3 *= 3;
+            ones = ternaryFromInt64( ( pow3 - 1 ) / 2 );
+            minusOnes = ternaryFromInt64( -( ( pow3 - 1 ) / 2 ) );
+            CHECK( ternaryADD( ones, ternaryFromInt64( 1 ) ) ==
+                   referenceAdd( ones, ternaryFromInt64( 1 ) ) );
+            CHECK( ternaryADD( minusOnes, ternaryFromInt64( -1 ) ) ==
+                   referenceAdd( minusOnes, ternaryFromInt64( -1 ) ) );
+        }
+    }
+}
+
 static void testAddCarry( void )
 {
     TriCpu cpu;
@@ -356,6 +451,7 @@ int main( void )
     testHaltAndClock();
     testTraps();
     testWordWidthAndFlags();
+    testAddFastPath();
     testAddCarry();
 
     if( failures != 0 )
