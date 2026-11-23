@@ -70,6 +70,7 @@ CORE_SRCS=cpu.c mem.c disassem.c ternary.c tml.c tml_log.c tml_policy.c sha256.c
 TESTBIN=test-core
 TMLTESTBIN=test-tml
 PHASE2TESTBIN=test-phase2
+RV32TESTBIN=test-rv32-mmu
 TEST_SRCS=tests/test_core.c $(CORE_SRCS)
 TML_TEST_SRCS=tests/test_tml.c $(CORE_SRCS)
 PHASE2_TEST_SRCS=tests/test_phase2.c $(CORE_SRCS)
@@ -109,6 +110,31 @@ test: $(TESTBIN) $(TMLTESTBIN) $(PHASE2TESTBIN)
 	./$(TESTBIN)
 	./$(TMLTESTBIN)
 	./$(PHASE2TESTBIN)
+
+$(RV32TESTBIN): tests/test_rv32_mmu.c rv32.c
+	@echo "Generating $@"
+	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_mmu.c -o $@
+
+.PHONY: test-rv32
+test-rv32: $(RV32TESTBIN)
+	./$(RV32TESTBIN)
+
+RV32_CROSS?=riscv64-unknown-elf-
+RV32_GUEST_SRC=tests/rv32_mmu_guest.S tests/rv32_mmu_guest.ld
+RV32_GUEST_ELF=tests/rv32_mmu_guest.elf
+RV32_GUEST_BIN=tests/rv32_mmu_guest.bin
+
+$(RV32_GUEST_ELF): $(RV32_GUEST_SRC)
+	$(RV32_CROSS)gcc -march=rv32ima_zicsr_zifencei -mabi=ilp32 -nostdlib \
+		-static -mno-relax -Wl,-T,tests/rv32_mmu_guest.ld \
+		-o $@ tests/rv32_mmu_guest.S
+
+$(RV32_GUEST_BIN): $(RV32_GUEST_ELF)
+	$(RV32_CROSS)objcopy -O binary $< $@
+
+.PHONY: test-rv32-guest
+test-rv32-guest: $(GUEST) $(RV32_GUEST_BIN)
+	./$(GUEST) --kernel $(RV32_GUEST_BIN) --max-insn 1000000 --quiet
 
 .PHONY: test-tools
 test-tools: $(PKG)

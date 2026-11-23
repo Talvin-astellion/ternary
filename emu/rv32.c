@@ -40,7 +40,7 @@
 #include <unistd.h>
 
 #define RAM_BASE        0x80000000u
-#define RAM_SIZE        (64u * 1024u * 1024u)
+#define RAM_SIZE        (128u * 1024u * 1024u)
 #define KERNEL_ADDR     0x80400000u
 #define DTB_ADDR        0x83e00000u
 #define INITRD_ADDR     0x83000000u
@@ -101,6 +101,26 @@
 #define FDT_NOP         4
 #define FDT_END         9
 
+#define SATP_MODE_SV32  0x80000000u
+#define SATP_PPN_MASK   0x003fffffu
+#define PTE_V           0x00000001u
+#define PTE_R           0x00000002u
+#define PTE_W           0x00000004u
+#define PTE_X           0x00000008u
+#define PTE_U           0x00000010u
+#define PTE_A           0x00000040u
+#define PTE_D           0x00000080u
+#define PTE_RWX         (PTE_R | PTE_W | PTE_X)
+#define CAUSE_INST_PF   12
+#define CAUSE_LOAD_PF   13
+#define CAUSE_STORE_PF  15
+
+enum MemAccess {
+    ACCESS_FETCH,
+    ACCESS_LOAD,
+    ACCESS_STORE
+};
+
 static uint8_t *ram;
 static uint32_t regs[32];
 static uint32_t pc;
@@ -137,7 +157,11 @@ static uint64_t trace_count;
 static uint64_t sample_count;
 static int quiet;
 static int debug_sbi;
+static int debug_mmu;
 static int mem_fault;
+static uint32_t mmu_fault_cause;
+static uint64_t mmu_walks;
+static uint64_t mmu_faults;
 
 static void console_putc(uint8_t c)
 {
@@ -209,9 +233,19 @@ static inline int in_test(uint32_t addr)
     return addr >= TEST_ADDR && addr < TEST_ADDR + TEST_SIZE;
 }
 
-static uint8_t mem_load8(uint32_t addr)
+static inline int phys_in_ram(uint32_t addr)
 {
-    if (in_ram(addr))
+    return addr >= RAM_BASE && addr < (uint64_t)RAM_BASE + RAM_SIZE;
+}
+
+static inline int phys_in_ram_n(uint32_t addr, uint32_t size)
+{
+    return addr >= RAM_BASE && (uint64_t)addr + size <= (uint64_t)RAM_BASE + RAM_SIZE;
+}
+
+static uint8_t phys_load8(uint32_t addr)
+{
+    if (phys_in_ram(addr))
         return ram[addr - RAM_BASE];
     if (in_uart(addr) || in_test(addr))
         return 0;
@@ -219,26 +253,17 @@ static uint8_t mem_load8(uint32_t addr)
     return 0;
 }
 
-static uint16_t mem_load16(uint32_t addr)
+static uint32_t phys_load32(uint32_t addr)
 {
-    if (!(addr & 1u) && in_ram(addr))
-        return (uint16_t)ram[addr - RAM_BASE] |
-               ((uint16_t)ram[addr - RAM_BASE + 1] << 8);
-    return (uint16_t)mem_load8(addr) |
-           ((uint16_t)mem_load8(addr + 1) << 8);
-}
-
-static uint32_t mem_load32(uint32_t addr)
-{
-    if (!(addr & 3u) && in_ram(addr))
+    if (!(addr & 3u) && phys_in_ram_n(addr, 4))
         return (uint32_t)ram[addr - RAM_BASE] |
                ((uint32_t)ram[addr - RAM_BASE + 1] << 8) |
                ((uint32_t)ram[addr - RAM_BASE + 2] << 16) |
                ((uint32_t)ram[addr - RAM_BASE + 3] << 24);
-    return (uint32_t)mem_load8(addr) |
-           ((uint32_t)mem_load8(addr + 1) << 8) |
-           ((uint32_t)mem_load8(addr + 2) << 16) |
-           ((uint32_t)mem_load8(addr + 3) << 24);
+    return (uint32_t)phys_load8(addr) |
+           ((uint32_t)phys_load8(addr + 1) << 8) |
+           ((uint32_t)phys_load8(addr + 2) << 16) |
+           ((uint32_t)phys_load8(addr + 3) << 24);
 }
 
 static void test_finisher(uint32_t val)
@@ -255,9 +280,9 @@ static void test_finisher(uint32_t val)
     }
 }
 
-static void mem_store8(uint32_t addr, uint8_t val)
+static void phys_store8(uint32_t addr, uint8_t val)
 {
-    if (in_ram(addr)) {
+    if (phys_in_ram(addr)) {
         ram[addr - RAM_BASE] = val;
         return;
     }
@@ -270,20 +295,9 @@ static void mem_store8(uint32_t addr, uint8_t val)
     mem_fault = 1;
 }
 
-static void mem_store16(uint32_t addr, uint16_t val)
+static void phys_store32(uint32_t addr, uint32_t val)
 {
-    if (!(addr & 1u) && in_ram(addr)) {
-        ram[addr - RAM_BASE] = val & 0xff;
-        ram[addr - RAM_BASE + 1] = val >> 8;
-        return;
-    }
-    mem_store8(addr, val & 0xff);
-    mem_store8(addr + 1, val >> 8);
-}
-
-static void mem_store32(uint32_t addr, uint32_t val)
-{
-    if (!(addr & 3u) && in_ram(addr)) {
+    if (!(addr & 3u) && phys_in_ram_n(addr, 4)) {
         ram[addr - RAM_BASE] = val & 0xff;
         ram[addr - RAM_BASE + 1] = (val >> 8) & 0xff;
         ram[addr - RAM_BASE + 2] = (val >> 16) & 0xff;
@@ -293,6 +307,148 @@ static void mem_store32(uint32_t addr, uint32_t val)
     if (in_test(addr)) {
         test_finisher(val);
         return;
+    }
+    phys_store8(addr, val & 0xff);
+    phys_store8(addr + 1, (val >> 8) & 0xff);
+    phys_store8(addr + 2, (val >> 16) & 0xff);
+    phys_store8(addr + 3, (val >> 24) & 0xff);
+}
+
+static int translate_addr(uint32_t va, enum MemAccess access, uint32_t *pa_out)
+{
+    uint32_t root, pte_addr = 0, pte = 0, pa;
+    uint32_t vpn0, vpn1, needed;
+
+    if (!(satp & SATP_MODE_SV32)) {
+        *pa_out = va;
+        return 1;
+    }
+
+    mmu_walks++;
+    vpn1 = va >> 22;
+    vpn0 = (va >> 12) & 0x3ffu;
+    root = (satp & SATP_PPN_MASK) << 12;
+    pte_addr = root + vpn1 * 4u;
+    if (!phys_in_ram_n(pte_addr, 4))
+        goto fail;
+    pte = phys_load32(pte_addr);
+    if (!(pte & PTE_V))
+        goto fail;
+
+    if (!(pte & PTE_RWX)) {
+        uint32_t next = (pte & 0xfffffc00u) << 2;
+
+        pte_addr = next + vpn0 * 4u;
+        if (!phys_in_ram_n(pte_addr, 4))
+            goto fail;
+        pte = phys_load32(pte_addr);
+        if (!(pte & PTE_V) || !(pte & PTE_RWX))
+            goto fail;
+        pa = ((pte & 0xfffffc00u) << 2) | (va & 0xfffu);
+    } else {
+        pa = ((pte & 0xfffffc00u) << 2) | (va & 0x003fffffu);
+    }
+
+    if (priv == 0) {
+        if (!(pte & PTE_U))
+            goto fail;
+    } else if ((pte & PTE_U) && !(mstatus & MSTATUS_SUM) &&
+               access != ACCESS_FETCH) {
+        goto fail;
+    }
+
+    if (access == ACCESS_STORE) {
+        needed = PTE_W;
+    } else if (access == ACCESS_FETCH) {
+        needed = PTE_X;
+    } else if ((pte & PTE_X) && !(pte & PTE_R) && (mstatus & MSTATUS_MXR)) {
+        needed = PTE_X;
+    } else {
+        needed = PTE_R;
+    }
+    if (!(pte & needed))
+        goto fail;
+
+    if (!(pte & PTE_A) || (access == ACCESS_STORE && !(pte & PTE_D))) {
+        uint32_t updated = pte | PTE_A |
+                           (access == ACCESS_STORE ? PTE_D : 0u);
+
+        if (phys_in_ram_n(pte_addr, 4))
+            phys_store32(pte_addr, updated);
+    }
+
+    *pa_out = pa;
+    mmu_fault_cause = 0;
+    return 1;
+
+fail:
+    mmu_faults++;
+    mmu_fault_cause = access == ACCESS_FETCH ? CAUSE_INST_PF :
+                      access == ACCESS_STORE ? CAUSE_STORE_PF : CAUSE_LOAD_PF;
+    if (debug_mmu) {
+        fprintf(stderr, "mmu: va=0x%08x access=%u satp=0x%08x pte=0x%08x@0x%08x cause=%u\n",
+                va, (unsigned)access, satp, pte, pte_addr, mmu_fault_cause);
+        root = (satp & SATP_PPN_MASK) << 12;
+        for (uint32_t i = 0; i < 1024u; i++) {
+            uint32_t entry = phys_load32(root + i * 4u);
+            if (entry & PTE_V)
+                fprintf(stderr, "mmu: root[%03x]=0x%08x va=0x%08x\n",
+                        i, entry, i << 22);
+        }
+    }
+    return 0;
+}
+
+static uint8_t mem_load8(uint32_t addr)
+{
+    uint32_t pa;
+
+    mem_fault = 0;
+    if (!translate_addr(addr, ACCESS_LOAD, &pa))
+        return 0;
+    return phys_load8(pa);
+}
+
+static uint16_t mem_load16(uint32_t addr)
+{
+    return (uint16_t)mem_load8(addr) |
+           ((uint16_t)mem_load8(addr + 1) << 8);
+}
+
+static uint32_t mem_load32(uint32_t addr)
+{
+    return (uint32_t)mem_load8(addr) |
+           ((uint32_t)mem_load8(addr + 1) << 8) |
+           ((uint32_t)mem_load8(addr + 2) << 16) |
+           ((uint32_t)mem_load8(addr + 3) << 24);
+}
+
+static void mem_store8(uint32_t addr, uint8_t val)
+{
+    uint32_t pa;
+
+    mem_fault = 0;
+    if (!translate_addr(addr, ACCESS_STORE, &pa))
+        return;
+    phys_store8(pa, val);
+}
+
+static void mem_store16(uint32_t addr, uint16_t val)
+{
+    mem_store8(addr, val & 0xff);
+    mem_store8(addr + 1, val >> 8);
+}
+
+static void mem_store32(uint32_t addr, uint32_t val)
+{
+    uint32_t pa;
+
+    if (!(addr & 3u)) {
+        mem_fault = 0;
+        if (translate_addr(addr, ACCESS_STORE, &pa) && in_test(pa)) {
+            test_finisher(val);
+            return;
+        }
     }
     mem_store8(addr, val & 0xff);
     mem_store8(addr + 1, (val >> 8) & 0xff);
@@ -338,7 +494,10 @@ static uint32_t csr_read(uint32_t csr)
 static void csr_write(uint32_t csr, uint32_t val)
 {
     switch (csr) {
-    case 0x100: sstatus = val & SSTATUS_MASK; break;
+    case 0x100:
+        sstatus = val & SSTATUS_MASK;
+        mstatus = (mstatus & ~SSTATUS_MASK) | sstatus;
+        break;
     case 0x104: sie = val & (SIE_SSIE | SIE_STIE | SIE_SEIE); break;
     case 0x105: stvec = val & ~3u; break;
     case 0x140: sscratch = val; break;
@@ -348,8 +507,18 @@ static void csr_write(uint32_t csr, uint32_t val)
     case 0x144:
         sip = (sip & SIP_STIP) | (val & ~SIP_STIP);
         break;
-    case 0x180: satp = val; break;
-    case 0x300: mstatus = val & SSTATUS_MASK; break;
+    case 0x180:
+        if ((val & 0xc0000000u) == 0)
+            satp = 0;
+        else if ((val & 0xc0000000u) == SATP_MODE_SV32)
+            satp = val & (SATP_MODE_SV32 | SATP_PPN_MASK);
+        else if (debug_mmu)
+            fprintf(stderr, "mmu: unsupported satp mode 0x%08x ignored\n", val);
+        break;
+    case 0x300:
+        mstatus = val;
+        sstatus = mstatus & SSTATUS_MASK;
+        break;
     case 0x304: mie = val & (SIE_SSIE | SIE_STIE | SIE_SEIE); break;
     case 0x305: mtvec = val & ~3u; break;
     case 0x340: mscratch = val; break;
@@ -371,6 +540,7 @@ static void do_trap(uint32_t cause, uint32_t tval, int interrupt, uint32_t epc)
 
     sstatus = (sstatus & ~(MSTATUS_SIE | MSTATUS_SPIE | MSTATUS_SPP)) |
               ((sstatus & MSTATUS_SIE) ? MSTATUS_SPIE : 0) | spp;
+    mstatus = (mstatus & ~SSTATUS_MASK) | sstatus;
     priv = 1;
     sepc = epc;
     scause = interrupt ? (cause | 0x80000000u) : cause;
@@ -555,7 +725,7 @@ static void sbi_call(void)
                 a0 = sizeof(buf);
             for (i = 0; i < a0; i++) {
                 mem_fault = 0;
-                buf[i] = mem_load8((uint32_t)(addr + i));
+                buf[i] = phys_load8((uint32_t)(addr + i));
                 if (mem_fault)
                     break;
             }
@@ -569,7 +739,7 @@ static void sbi_call(void)
             n = console_try_read(buf, a0);
             if (n > 0) {
                 for (i = 0; i < (uint32_t)n; i++)
-                    mem_store8((uint32_t)(addr + i), buf[i]);
+                    phys_store8((uint32_t)(addr + i), buf[i]);
                 ret = (uint32_t)n;
             }
             break;
@@ -663,6 +833,7 @@ static void execute(uint32_t inst, uint32_t cur_pc)
     case 0x03: /* loads */
         addr = regs[rs1] + (uint32_t)imm_i(inst);
         mem_fault = 0;
+        mmu_fault_cause = 0;
         switch (funct3) {
         case 0:
             val = (uint32_t)(int32_t)(int8_t)mem_load8(addr);
@@ -683,14 +854,16 @@ static void execute(uint32_t inst, uint32_t cur_pc)
             do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
             return;
         }
-        if (mem_fault)
-            do_trap(CAUSE_LOAD, addr, 0, cur_pc);
+        if (mem_fault || mmu_fault_cause)
+            do_trap(mmu_fault_cause ? mmu_fault_cause : CAUSE_LOAD,
+                    addr, 0, cur_pc);
         else
             set_reg(rd, val);
         break;
     case 0x23: /* stores */
         addr = regs[rs1] + (uint32_t)imm_s(inst);
         mem_fault = 0;
+        mmu_fault_cause = 0;
         switch (funct3) {
         case 0: mem_store8(addr, (uint8_t)regs[rs2]); break;
         case 1: mem_store16(addr, (uint16_t)regs[rs2]); break;
@@ -700,8 +873,9 @@ static void execute(uint32_t inst, uint32_t cur_pc)
             return;
         }
         reservation = ~0u;
-        if (mem_fault)
-            do_trap(CAUSE_STORE, addr, 0, cur_pc);
+        if (mem_fault || mmu_fault_cause)
+            do_trap(mmu_fault_cause ? mmu_fault_cause : CAUSE_STORE,
+                    addr, 0, cur_pc);
         break;
     case 0x13: /* OP-IMM */
         simm = imm_i(inst);
@@ -839,9 +1013,11 @@ static void execute(uint32_t inst, uint32_t cur_pc)
         }
         addr = regs[rs1];
         mem_fault = 0;
+        mmu_fault_cause = 0;
         old = mem_load32(addr);
-        if (mem_fault) {
-            do_trap(CAUSE_LOAD, addr, 0, cur_pc);
+        if (mem_fault || mmu_fault_cause) {
+            do_trap(mmu_fault_cause ? mmu_fault_cause : CAUSE_LOAD,
+                    addr, 0, cur_pc);
             return;
         }
         switch (inst >> 27) {
@@ -852,9 +1028,11 @@ static void execute(uint32_t inst, uint32_t cur_pc)
         case 0x03: /* sc.w */
             if (reservation == addr) {
                 mem_fault = 0;
+                mmu_fault_cause = 0;
                 mem_store32(addr, regs[rs2]);
-                if (mem_fault)
-                    do_trap(CAUSE_STORE, addr, 0, cur_pc);
+                if (mem_fault || mmu_fault_cause)
+                    do_trap(mmu_fault_cause ? mmu_fault_cause : CAUSE_STORE,
+                            addr, 0, cur_pc);
                 else
                     set_reg(rd, 0);
             } else {
@@ -879,9 +1057,11 @@ static void execute(uint32_t inst, uint32_t cur_pc)
                 return;
             }
             mem_fault = 0;
+            mmu_fault_cause = 0;
             mem_store32(addr, val);
-            if (mem_fault)
-                do_trap(CAUSE_STORE, addr, 0, cur_pc);
+            if (mem_fault || mmu_fault_cause)
+                do_trap(mmu_fault_cause ? mmu_fault_cause : CAUSE_STORE,
+                        addr, 0, cur_pc);
             else
                 set_reg(rd, old);
             break;
@@ -907,12 +1087,14 @@ static void execute(uint32_t inst, uint32_t cur_pc)
                           ((sstatus & MSTATUS_SPIE) ? MSTATUS_SIE : 0);
                 sstatus |= MSTATUS_SPIE;
                 sstatus &= ~MSTATUS_SPP;
+                mstatus = (mstatus & ~SSTATUS_MASK) | sstatus;
                 break;
             case 0x30200073: /* mret */
                 pc = mepc;
                 mstatus = (mstatus & ~MSTATUS_SIE) |
                           ((mstatus & MSTATUS_SPIE) ? MSTATUS_SIE : 0);
                 mstatus |= MSTATUS_SPIE;
+                sstatus = mstatus & SSTATUS_MASK;
                 break;
             case 0x10500073: /* wfi */
                 if (sleep_wfi && !((sip & (sie & MSTATUS_SIE)) &&
@@ -1080,6 +1262,7 @@ static void usage(const char *prog)
 {
     fprintf(stderr,
             "Usage: %s --kernel Image [options]\n"
+            "  --kernel-addr ADDR  load kernel at physical address (default 0x%08x)\n"
             "  --dtb FILE          load DTB at 0x%08x\n"
             "  --initrd FILE       load initramfs at 0x%08x\n"
             "  --load ADDR FILE    load raw file at physical address\n"
@@ -1089,10 +1272,11 @@ static void usage(const char *prog)
             "  --sample N          print pc/ra every N instructions\n"
             "  --timebase HZ       guest timebase (default %u)\n"
             "  --time-inst         derive guest time from instruction count\n"
-            "  --no-sleep          do not sleep in wfi\n"
-            "  --debug-sbi         log SBI calls\n"
-            "  --quiet             suppress emulator diagnostics\n",
-            prog, DTB_ADDR, INITRD_ADDR, KERNEL_ADDR, timebase);
+             "  --no-sleep          do not sleep in wfi\n"
+             "  --debug-sbi         log SBI calls\n"
+             "  --debug-mmu         log Sv32 translation faults and satp writes\n"
+             "  --quiet             suppress emulator diagnostics\n",
+            prog, KERNEL_ADDR, DTB_ADDR, INITRD_ADDR, KERNEL_ADDR, timebase);
 }
 
 int main(int argc, char **argv)
@@ -1102,6 +1286,7 @@ int main(int argc, char **argv)
     const char *initrd = NULL;
     uint32_t dtb_addr = DTB_ADDR;
     uint32_t initrd_addr = INITRD_ADDR;
+    uint32_t kernel_addr = KERNEL_ADDR;
     uint32_t entry = KERNEL_ADDR;
     struct timespec ts;
     int i;
@@ -1109,6 +1294,9 @@ int main(int argc, char **argv)
     for (i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--kernel") && i + 1 < argc) {
             kernel = argv[++i];
+        } else if (!strcmp(argv[i], "--kernel-addr") && i + 1 < argc) {
+            kernel_addr = (uint32_t)strtoul(argv[++i], NULL, 0);
+            entry = kernel_addr;
         } else if (!strcmp(argv[i], "--dtb") && i + 1 < argc) {
             dtb = argv[++i];
         } else if (!strcmp(argv[i], "--initrd") && i + 1 < argc) {
@@ -1139,6 +1327,8 @@ int main(int argc, char **argv)
             sleep_wfi = 0;
         } else if (!strcmp(argv[i], "--debug-sbi")) {
             debug_sbi = 1;
+        } else if (!strcmp(argv[i], "--debug-mmu")) {
+            debug_mmu = 1;
         } else if (!strcmp(argv[i], "--quiet")) {
             quiet = 1;
         } else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
@@ -1162,7 +1352,7 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    if (load_file(kernel, KERNEL_ADDR, NULL) != 0)
+    if (load_file(kernel, kernel_addr, NULL) != 0)
         return 2;
     if (dtb && load_file(dtb, dtb_addr, NULL) != 0)
         return 2;
@@ -1184,11 +1374,11 @@ int main(int argc, char **argv)
 
     if (!quiet) {
         fprintf(stderr, "tern-linux: kernel 0x%08x dtb 0x%08x entry 0x%08x\n",
-                KERNEL_ADDR, regs[11], pc);
+                kernel_addr, regs[11], pc);
     }
 
     for (;;) {
-        uint32_t cur_pc, inst;
+        uint32_t cur_pc, inst, fetch_pa;
 
         if (max_insn && instret >= max_insn) {
             fprintf(stderr, "\ntern-linux: instruction limit %" PRIu64
@@ -1199,13 +1389,26 @@ int main(int argc, char **argv)
         if (maybe_interrupt())
             continue;
 
-        if (!in_ram(pc)) {
-            do_trap(CAUSE_LOAD, pc, 0, pc);
+        mem_fault = 0;
+        mmu_fault_cause = 0;
+        if (!translate_addr(pc, ACCESS_FETCH, &fetch_pa) ||
+            !phys_in_ram_n(fetch_pa, 4)) {
+            if (debug_mmu)
+                fprintf(stderr, "mmu: fetch trap pc=0x%08x cause=%u stvec=0x%08x\n",
+                        pc, mmu_fault_cause ? mmu_fault_cause : CAUSE_INST_PF, stvec);
+            do_trap(mmu_fault_cause ? mmu_fault_cause : CAUSE_INST_PF,
+                    pc, 0, pc);
+            if (debug_mmu)
+                fprintf(stderr, "mmu: redirected pc=0x%08x\n", pc);
             continue;
         }
 
         cur_pc = pc;
-        inst = mem_load32(cur_pc);
+        inst = phys_load32(fetch_pa);
+        if (mem_fault) {
+            do_trap(CAUSE_INST_PF, pc, 0, pc);
+            continue;
+        }
         pc = cur_pc + 4;
         instret++;
         cycle++;

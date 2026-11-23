@@ -4,4 +4,13 @@
 - make -C work ternary-linux-userspace
 - make -C work ternary-linux-run → TERNARY_LINUX_OK
 - QEMU boot with -initrd → TERNARY_LINUX_OK
+- make -C emu test
+- make -C emu test-rv32
+- make -C emu test-rv32-guest → Sv32 guest PASS
+- make -C emu sanitize
+- make -C work ternary-linux-isa → ISA/SBI PASS
+- make -C tools/systemd check → prerequisites report
 - git diff --check clean
+
+- Pending:
+- make -C tools/systemd all → SYSTEMD_OK (нужен RV32 glibc sysroot; локально нет кросс-компилятора/meson/ninja)

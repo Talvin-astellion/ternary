@@ -19,7 +19,8 @@ the analysis tools are optional Python 3 scripts.
 | `trace.c`, `trace.h` | Instruction / taint / memory JSONL tracing |
 | `taint.c`, `taint.h` | Register and memory taint propagation |
 | `symbolic.c`, `symbolic.h` | Lightweight collection of conditional constraints |
-| `tests/` | Unit tests run by `make test` |
+| `rv32.c` | RV32IMA guest interpreter (`tern-linux`) with Sv32 MMU |
+| `tests/` | Unit tests run by `make test` / `make test-rv32` |
 
 ## Build and test
 
@@ -28,6 +29,8 @@ make -C emu                 # builds emu/tern-cpu-emu
 make -C emu test            # core, TML and trace/taint/symbolic tests
 make -C emu sanitize        # same tests with ASan and UBSan
 make -C emu test-tools      # Python verifier and cross-process log recovery tests
+make -C emu test-rv32       # host-side Sv32 translation tests
+make -C emu test-rv32-guest # bare-metal Sv32 guest test (needs RV32 cross gcc)
 make -C emu bench           # compare cached and uncached instruction decoding
 ```
 
@@ -219,6 +222,20 @@ taint_freeze=0
 `tau_pause` / `tau_refuse` are inclusive risk thresholds.  When taint is
 enabled, a tainted action adds `taint_penalty` to its risk score; with
 `taint_freeze=1` a tainted action at or above `tau_refuse` enters `FREEZE`.
+
+## RV32 guest MMU and systemd initrd
+
+`tern-linux` implements Sv32 address translation for RV32 guests.  Writing
+`satp` with mode `Sv32` enables two-level page tables with 4 KiB and 4 MiB
+pages; `Bare` keeps the previous physical-address behaviour.  Access rights,
+`mstatus.SUM`/`MXR`, accessed/dirty bits and instruction/load/store page faults
+(causes 12/13/15) are emulated.  `sfence.vma` is a no-op because there is no TLB.
+Use `--debug-mmu` to log translation failures.
+
+The systemd-as-PID-1 pipeline builds a systemd initramfs for an MMU-enabled
+RV32 guest and boots it with `--initrd`.  See
+[`tools/systemd/README.md`](../tools/systemd/README.md) for prerequisites,
+kernel config and the complete workflow.
 
 ## Analysis tools
 
