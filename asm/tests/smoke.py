@@ -347,6 +347,23 @@ def test_hello():
         raise AssertionError("hello program did not halt cleanly\n%s" % output)
 
 
+def test_forth():
+    program = os.path.join(OUTDIR, "forth.trt")
+    if not os.path.exists(program):
+        raise AssertionError("missing assembled program %s" % program)
+    source = (
+        b"2 3 + . 7 2 - . 5 DUP + . 9 DROP 4 . "
+        b": INC 1 + . ; 4 INC : SUM + . ; 2 3 SUM 11 4 SUM BYE\n"
+    )
+    output = run_emulator_bytes(program, b"g\n" + source)
+    if "5 5 10 4 5 5 15 " not in output:
+        raise AssertionError("forth output not found\n%s" % output)
+    if "CPU halted" not in output:
+        raise AssertionError("forth program did not halt cleanly\n%s" % output)
+    if "?" in output:
+        raise AssertionError("forth interpreter reported an unknown token\n%s" % output)
+
+
 def test_serial_loader():
     hello = os.path.join(OUTDIR, "hello.trt")
     loader = os.path.join(OUTDIR, "loader.trt")
@@ -562,6 +579,7 @@ def main():
     test_data_directives()
     test_examples()
     test_hello()
+    test_forth()
     test_serial_loader()
     test_math_library()
     test_math_helpers()
