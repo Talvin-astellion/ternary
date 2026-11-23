@@ -75,6 +75,7 @@ RV32CSRTESTBIN=test-rv32-csr
 RV32TRAPTESTBIN=test-rv32-trap
 RV32TLBTESTBIN=test-rv32-tlb
 RV32AMOTESTBIN=test-rv32-amo
+RV32RVCTESTBIN=test-rv32-rvc
 TEST_SRCS=tests/test_core.c $(CORE_SRCS)
 TML_TEST_SRCS=tests/test_tml.c $(CORE_SRCS)
 PHASE2_TEST_SRCS=tests/test_phase2.c $(CORE_SRCS)
@@ -135,13 +136,18 @@ $(RV32AMOTESTBIN): tests/test_rv32_amo.c rv32.c
 	@echo "Generating $@"
 	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_amo.c -o $@
 
+$(RV32RVCTESTBIN): tests/test_rv32_rvc.c rv32.c
+	@echo "Generating $@"
+	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_rvc.c -o $@
+
 .PHONY: test-rv32
-test-rv32: $(RV32TESTBIN) $(RV32CSRTESTBIN) $(RV32TRAPTESTBIN) $(RV32TLBTESTBIN) $(RV32AMOTESTBIN) $(GUEST)
+test-rv32: $(RV32TESTBIN) $(RV32CSRTESTBIN) $(RV32TRAPTESTBIN) $(RV32TLBTESTBIN) $(RV32AMOTESTBIN) $(RV32RVCTESTBIN) $(GUEST)
 	./$(RV32TESTBIN)
 	./$(RV32CSRTESTBIN)
 	./$(RV32TRAPTESTBIN)
 	./$(RV32TLBTESTBIN)
 	./$(RV32AMOTESTBIN)
+	./$(RV32RVCTESTBIN)
 	python3 tests/test_rv32_images.py ./$(GUEST)
 
 RV32_CROSS?=riscv64-unknown-elf-
@@ -193,7 +199,7 @@ clean: clean-obj clean-asm
 	rm -rf *~
 
 clean-pkg: clean clean-dep
-	rm -rf $(PKG) $(GUEST) tern-test $(TESTBIN) $(TESTBIN)-san $(TMLTESTBIN) $(TMLTESTBIN)-san $(PHASE2TESTBIN) $(PHASE2TESTBIN)-san $(RV32TESTBIN) $(RV32CSRTESTBIN) $(RV32TRAPTESTBIN) $(RV32TLBTESTBIN) $(RV32AMOTESTBIN) bench-cpu bench-cpu-uncached bench-guest
+	rm -rf $(PKG) $(GUEST) tern-test $(TESTBIN) $(TESTBIN)-san $(TMLTESTBIN) $(TMLTESTBIN)-san $(PHASE2TESTBIN) $(PHASE2TESTBIN)-san $(RV32TESTBIN) $(RV32CSRTESTBIN) $(RV32TRAPTESTBIN) $(RV32TLBTESTBIN) $(RV32AMOTESTBIN) $(RV32RVCTESTBIN) bench-cpu bench-cpu-uncached bench-guest
 
 rebuild: clean-pkg pkg
 

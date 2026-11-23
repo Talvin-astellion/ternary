@@ -888,6 +888,285 @@ static uint32_t imm_u(uint32_t inst)
     return inst & 0xfffff000u;
 }
 
+static uint32_t insn_i(uint32_t imm, uint32_t rs1, uint32_t funct3,
+                       uint32_t rd, uint32_t op)
+{
+    return ((imm & 0xfffu) << 20) | (rs1 << 15) | (funct3 << 12) |
+           (rd << 7) | op;
+}
+
+static uint32_t insn_r(uint32_t funct7, uint32_t rs2, uint32_t rs1,
+                       uint32_t funct3, uint32_t rd, uint32_t op)
+{
+    return (funct7 << 25) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) |
+           (rd << 7) | op;
+}
+
+static uint32_t insn_s(uint32_t imm, uint32_t rs2, uint32_t rs1,
+                       uint32_t funct3)
+{
+    return (((imm >> 5) & 0x7fu) << 25) | (rs2 << 20) | (rs1 << 15) |
+           (funct3 << 12) | ((imm & 0x1fu) << 7) | 0x23u;
+}
+
+static uint32_t insn_b(int32_t imm, uint32_t rs2, uint32_t rs1,
+                       uint32_t funct3)
+{
+    uint32_t v = (uint32_t)imm;
+
+    return (((v >> 12) & 1u) << 31) | (((v >> 5) & 0x3fu) << 25) |
+           (rs2 << 20) | (rs1 << 15) | (funct3 << 12) |
+           (((v >> 1) & 0xfu) << 8) | (((v >> 11) & 1u) << 7) | 0x63u;
+}
+
+static uint32_t insn_j(int32_t imm, uint32_t rd)
+{
+    uint32_t v = (uint32_t)imm;
+
+    return (((v >> 20) & 1u) << 31) | (((v >> 1) & 0x3ffu) << 21) |
+           (((v >> 11) & 1u) << 20) | (((v >> 12) & 0xffu) << 12) |
+           (rd << 7) | 0x6fu;
+}
+
+static uint32_t insn_u(uint32_t imm, uint32_t rd, uint32_t op)
+{
+    return (imm & 0xfffff000u) | (rd << 7) | op;
+}
+
+static int32_t c_sext(uint32_t val, unsigned bits)
+{
+    val &= (1u << bits) - 1u;
+    return (int32_t)(val << (32 - bits)) >> (32 - bits);
+}
+
+static uint32_t c_ci_imm(uint16_t c)
+{
+    return (((uint32_t)c >> 12) & 1u) << 5 | (((uint32_t)c >> 2) & 0x1fu);
+}
+
+static uint32_t c_shamt(uint16_t c)
+{
+    return c_ci_imm(c);
+}
+
+static int32_t c_j_imm(uint16_t c)
+{
+    uint32_t v = (((uint32_t)c >> 12) & 1u) << 11 |
+                 (((uint32_t)c >> 11) & 1u) << 4 |
+                 (((uint32_t)c >> 9) & 3u) << 8 |
+                 (((uint32_t)c >> 8) & 1u) << 10 |
+                 (((uint32_t)c >> 7) & 1u) << 6 |
+                 (((uint32_t)c >> 6) & 1u) << 7 |
+                 (((uint32_t)c >> 3) & 7u) << 1 |
+                 (((uint32_t)c >> 2) & 1u) << 5;
+
+    return c_sext(v, 12);
+}
+
+static int32_t c_b_imm(uint16_t c)
+{
+    uint32_t v = (((uint32_t)c >> 12) & 1u) << 8 |
+                 (((uint32_t)c >> 10) & 3u) << 3 |
+                 (((uint32_t)c >> 5) & 3u) << 6 |
+                 (((uint32_t)c >> 3) & 3u) << 1 |
+                 (((uint32_t)c >> 2) & 1u) << 5;
+
+    return c_sext(v, 9);
+}
+
+static uint32_t c_cl_imm(uint16_t c)
+{
+    return (((uint32_t)c >> 10) & 7u) << 3 |
+           (((uint32_t)c >> 6) & 1u) << 2 |
+           (((uint32_t)c >> 5) & 1u) << 6;
+}
+
+static uint32_t c_addi4spn_imm(uint16_t c)
+{
+    return (((uint32_t)c >> 12) & 1u) << 5 |
+           (((uint32_t)c >> 11) & 1u) << 4 |
+           (((uint32_t)c >> 7) & 0xfu) << 6 |
+           (((uint32_t)c >> 6) & 1u) << 2 |
+           (((uint32_t)c >> 5) & 1u) << 3;
+}
+
+static int32_t c_addi16sp_imm(uint16_t c)
+{
+    uint32_t v = (((uint32_t)c >> 12) & 1u) << 9 |
+                 (((uint32_t)c >> 6) & 1u) << 4 |
+                 (((uint32_t)c >> 5) & 1u) << 6 |
+                 (((uint32_t)c >> 3) & 3u) << 7 |
+                 (((uint32_t)c >> 2) & 1u) << 5;
+
+    return c_sext(v, 10);
+}
+
+static int32_t c_lui_imm(uint16_t c)
+{
+    uint32_t v = (((uint32_t)c >> 12) & 1u) << 17 |
+                 (((uint32_t)c >> 2) & 0x1fu) << 12;
+
+    return c_sext(v, 18);
+}
+
+static uint32_t c_lwsp_imm(uint16_t c)
+{
+    return (((uint32_t)c >> 12) & 1u) << 5 |
+           (((uint32_t)c >> 4) & 7u) << 2 |
+           (((uint32_t)c >> 2) & 3u) << 6;
+}
+
+static uint32_t c_swsp_imm(uint16_t c)
+{
+    return (((uint32_t)c >> 9) & 0xfu) << 2 |
+           (((uint32_t)c >> 7) & 3u) << 6;
+}
+
+static int rv32c_expand(uint16_t c, uint32_t *out)
+{
+    uint32_t q = c & 3u;
+    uint32_t f3 = ((uint32_t)c >> 13) & 7u;
+    uint32_t rd = ((uint32_t)c >> 7) & 0x1fu;
+    uint32_t rs2 = ((uint32_t)c >> 2) & 0x1fu;
+    uint32_t rdp = 8u + (((uint32_t)c >> 2) & 7u);
+    uint32_t rs1p = 8u + (((uint32_t)c >> 7) & 7u);
+    uint32_t rs2p = 8u + (((uint32_t)c >> 2) & 7u);
+    uint32_t uimm, shamt;
+    int32_t imm;
+
+    if (q == 3u)
+        return 0;
+    switch (q) {
+    case 0:
+        switch (f3) {
+        case 0:
+            uimm = c_addi4spn_imm(c);
+            if (!uimm)
+                return 0;
+            *out = insn_i(uimm, 2, 0, rdp, 0x13u);
+            return 1;
+        case 2:
+            *out = insn_i(c_cl_imm(c), rs1p, 2, rdp, 0x03u);
+            return 1;
+        case 6:
+            *out = insn_s(c_cl_imm(c), rs2p, rs1p, 2);
+            return 1;
+        default:
+            return 0;
+        }
+    case 1:
+        switch (f3) {
+        case 0:
+            imm = c_sext(c_ci_imm(c), 6);
+            *out = insn_i((uint32_t)imm, rd, 0, rd, 0x13u);
+            return 1;
+        case 1:
+        case 5:
+            *out = insn_j(c_j_imm(c), f3 == 1 ? 1 : 0);
+            return 1;
+        case 2:
+            imm = c_sext(c_ci_imm(c), 6);
+            *out = insn_i((uint32_t)imm, 0, 0, rd, 0x13u);
+            return 1;
+        case 3:
+            if (rd == 2) {
+                imm = c_addi16sp_imm(c);
+                if (!imm)
+                    return 0;
+                *out = insn_i((uint32_t)imm, 2, 0, 2, 0x13u);
+            } else {
+                imm = c_lui_imm(c);
+                if (!imm)
+                    return 0;
+                *out = insn_u((uint32_t)imm, rd, 0x37u);
+            }
+            return 1;
+        case 4:
+            shamt = c_shamt(c);
+            switch ((c >> 10) & 3u) {
+            case 0:
+                if ((c >> 12) & 1u)
+                    return 0;
+                *out = insn_i(shamt, rs1p, 5, rs1p, 0x13u);
+                return 1;
+            case 1:
+                if ((c >> 12) & 1u)
+                    return 0;
+                *out = insn_i((0x20u << 5) | shamt, rs1p, 5, rs1p, 0x13u);
+                return 1;
+            case 2:
+                imm = c_sext(c_ci_imm(c), 6);
+                *out = insn_i((uint32_t)imm, rs1p, 7, rs1p, 0x13u);
+                return 1;
+            case 3:
+                if ((c >> 12) & 1u)
+                    return 0;
+                switch ((c >> 5) & 3u) {
+                case 0:
+                    *out = insn_r(0x20, rs2p, rs1p, 0, rs1p, 0x33u);
+                    return 1;
+                case 1:
+                    *out = insn_r(0, rs2p, rs1p, 4, rs1p, 0x33u);
+                    return 1;
+                case 2:
+                    *out = insn_r(0, rs2p, rs1p, 6, rs1p, 0x33u);
+                    return 1;
+                case 3:
+                    *out = insn_r(0, rs2p, rs1p, 7, rs1p, 0x33u);
+                    return 1;
+                }
+                return 0;
+            }
+            return 0;
+        case 6:
+        case 7:
+            *out = insn_b(c_b_imm(c), 0, rs1p, f3 == 6 ? 0 : 1);
+            return 1;
+        }
+        return 0;
+    case 2:
+        switch (f3) {
+        case 0:
+            if ((c >> 12) & 1u)
+                return 0;
+            *out = insn_i(c_shamt(c), rd, 1, rd, 0x13u);
+            return 1;
+        case 2:
+            if (!rd)
+                return 0;
+            *out = insn_i(c_lwsp_imm(c), 2, 2, rd, 0x03u);
+            return 1;
+        case 4:
+            if (!((c >> 12) & 1u)) {
+                if (!rs2) {
+                    if (!rd)
+                        return 0;
+                    *out = insn_i(0, rd, 0, 0, 0x67u);
+                    return 1;
+                }
+                *out = insn_r(0, rs2, 0, 0, rd, 0x33u);
+                return 1;
+            }
+            if (!rs2) {
+                if (!rd) {
+                    *out = 0x00100073u;
+                    return 1;
+                }
+                *out = insn_i(0, rd, 0, 1, 0x67u);
+                return 1;
+            }
+            *out = insn_r(0, rs2, rd, 0, rd, 0x33u);
+            return 1;
+        case 6:
+            *out = insn_s(c_swsp_imm(c), rs2, 2, 2);
+            return 1;
+        default:
+            return 0;
+        }
+    }
+    return 0;
+}
+
 static uint32_t sbi_ext_supported(uint32_t eid)
 {
     switch (eid) {
@@ -1444,6 +1723,58 @@ static void execute(uint32_t inst, uint32_t cur_pc)
     }
 }
 
+static void fetch_fault(uint32_t cause, uint32_t tval)
+{
+    if (debug_mmu)
+        fprintf(stderr, "mmu: fetch trap pc=0x%08x cause=%u stvec=0x%08x\n",
+                pc, cause, stvec);
+    do_trap(cause, tval, 0, pc);
+    if (debug_mmu)
+        fprintf(stderr, "mmu: redirected pc=0x%08x\n", pc);
+}
+
+static int fetch_insn(uint32_t *inst, unsigned *len)
+{
+    uint32_t lo_pa, hi_pa;
+    uint16_t lo, hi;
+
+    mem_fault = 0;
+    mmu_fault_cause = 0;
+    if (!translate_addr(pc, ACCESS_FETCH, &lo_pa) ||
+        !phys_in_ram_n(lo_pa, 2)) {
+        fetch_fault(mmu_fault_cause ? mmu_fault_cause : CAUSE_INST_PF, pc);
+        return 0;
+    }
+    lo = (uint16_t)(phys_load8(lo_pa) |
+                    ((uint16_t)phys_load8(lo_pa + 1) << 8));
+    if (mem_fault) {
+        fetch_fault(CAUSE_INST_PF, pc);
+        return 0;
+    }
+    if ((lo & 3u) != 3u) {
+        if (!rv32c_expand(lo, inst)) {
+            fetch_fault(CAUSE_ILLEGAL, lo);
+            return 0;
+        }
+        *len = 2;
+        return 1;
+    }
+    if (!translate_addr(pc + 2, ACCESS_FETCH, &hi_pa) ||
+        !phys_in_ram_n(hi_pa, 2)) {
+        fetch_fault(mmu_fault_cause ? mmu_fault_cause : CAUSE_INST_PF, pc);
+        return 0;
+    }
+    hi = (uint16_t)(phys_load8(hi_pa) |
+                    ((uint16_t)phys_load8(hi_pa + 1) << 8));
+    if (mem_fault) {
+        fetch_fault(CAUSE_INST_PF, pc);
+        return 0;
+    }
+    *inst = (uint32_t)lo | ((uint32_t)hi << 16);
+    *len = 4;
+    return 1;
+}
+
 struct BootImage {
     const char *path;
     uint32_t addr;
@@ -1748,7 +2079,8 @@ int main(int argc, char **argv)
     }
 
     for (;;) {
-        uint32_t cur_pc, inst, fetch_pa;
+        uint32_t cur_pc, inst;
+        unsigned len;
 
         if (max_insn && instret >= max_insn) {
             fprintf(stderr, "\ntern-linux: instruction limit %" PRIu64
@@ -1759,27 +2091,10 @@ int main(int argc, char **argv)
         if (maybe_interrupt())
             continue;
 
-        mem_fault = 0;
-        mmu_fault_cause = 0;
-        if (!translate_addr(pc, ACCESS_FETCH, &fetch_pa) ||
-            !phys_in_ram_n(fetch_pa, 4)) {
-            if (debug_mmu)
-                fprintf(stderr, "mmu: fetch trap pc=0x%08x cause=%u stvec=0x%08x\n",
-                        pc, mmu_fault_cause ? mmu_fault_cause : CAUSE_INST_PF, stvec);
-            do_trap(mmu_fault_cause ? mmu_fault_cause : CAUSE_INST_PF,
-                    pc, 0, pc);
-            if (debug_mmu)
-                fprintf(stderr, "mmu: redirected pc=0x%08x\n", pc);
-            continue;
-        }
-
         cur_pc = pc;
-        inst = phys_load32(fetch_pa);
-        if (mem_fault) {
-            do_trap(CAUSE_INST_PF, pc, 0, pc);
+        if (!fetch_insn(&inst, &len))
             continue;
-        }
-        pc = cur_pc + 4;
+        pc = cur_pc + len;
         instret++;
         cycle++;
 

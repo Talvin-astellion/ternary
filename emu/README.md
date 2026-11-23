@@ -240,7 +240,9 @@ stores stop at the first faulting byte, so a page-crossing access cannot hide
 an earlier translation fault.  `lr.w`, `sc.w` and AMOs require natural 4-byte
 alignment; misaligned atomics raise a load-address-misaligned trap and any
 successful store or AMO clears the local reservation.  `fence` and `fence.i` are no-ops in this
-single-core model.  CSR access is privilege checked: user mode may
+single-core model.  RV32C instructions are decompressed before execution, with
+2-byte fetches and page-boundary handling; compressed floating-point and
+RV64-only encodings are illegal.  CSR access is privilege checked: user mode may
 read `cycle`/`time`/`instret`, while supervisor/machine CSRs, unknown CSRs and
 writes to read-only CSRs raise illegal-instruction traps.  Supervisor interrupts
 honor direct/vectored `stvec`, prioritize external, timer, then software sources,

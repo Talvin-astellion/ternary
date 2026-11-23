@@ -51,6 +51,7 @@ emu/test-rv32-csr
 emu/test-rv32-trap
 emu/test-rv32-tlb
 emu/test-rv32-amo
+emu/test-rv32-rvc
 emu/tests/rv32_mmu_guest.elf
 emu/tests/rv32_mmu_guest.bin
 tools/systemd/build/
