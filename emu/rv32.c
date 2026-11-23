@@ -1571,6 +1571,11 @@ static void execute(uint32_t inst, uint32_t cur_pc)
             do_trap(CAUSE_MISALIGNED, addr, 0, cur_pc);
             return;
         }
+        if (((inst >> 27) == 0x02u && ((inst >> 25) & 3u) == 1u) ||
+            ((inst >> 27) == 0x03u && ((inst >> 25) & 3u) == 2u)) {
+            do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
+            return;
+        }
         mem_fault = 0;
         mmu_fault_cause = 0;
         old = mem_load32(addr);

@@ -137,6 +137,29 @@ int main(void)
     assert(get32(ADDR1) == 0x11223344u);
 
     reset_cpu();
+    regs[1] = ADDR1;
+    inst = atomic(0x02u, 1u, 0, 1, 10);
+    expect_trap(inst, CAUSE_ILLEGAL, inst);
+
+    reset_cpu();
+    regs[1] = ADDR1;
+    regs[2] = 1;
+    inst = atomic(0x03u, 2u, 2, 1, 10);
+    expect_trap(inst, CAUSE_ILLEGAL, inst);
+
+    reset_cpu();
+    regs[1] = ADDR1;
+    execute(atomic(0x02u, 2u, 0, 1, 10), TEST_PC);
+    assert(scause == 0);
+    regs[2] = 1;
+    execute(atomic(0x03u, 1u, 2, 1, 10), TEST_PC);
+    assert(scause == 0);
+    execute(atomic(0x02u, 3u, 0, 1, 10), TEST_PC);
+    assert(scause == 0);
+    execute(atomic(0x03u, 3u, 2, 1, 10), TEST_PC);
+    assert(scause == 0);
+
+    reset_cpu();
     execute(0x0ff0000fu, TEST_PC);
     assert(scause == 0);
     execute(0x0000100fu, TEST_PC);

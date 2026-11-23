@@ -238,8 +238,9 @@ user pages always fault, even when `SUM` is set, and 4 MiB leaves with a
 nonzero low PPN or a `W`-without-`R` mapping are rejected.  Multi-byte loads and
 stores stop at the first faulting byte, so a page-crossing access cannot hide
 an earlier translation fault.  `lr.w`, `sc.w` and AMOs require natural 4-byte
-alignment; misaligned atomics raise a load-address-misaligned trap and any
-successful store or AMO clears the local reservation.  `fence` and `fence.i` are no-ops in this
+alignment; misaligned atomics raise a load-address-misaligned trap, reserved
+`lr.w`/`sc.w` ordering encodings are illegal, and any successful store or AMO
+clears the local reservation.  `fence` and `fence.i` are no-ops in this
 single-core model.  RV32C instructions are decompressed before execution, with
 2-byte fetches and page-boundary handling; compressed floating-point and
 RV64-only encodings are illegal.  CSR access is privilege checked: user mode may
