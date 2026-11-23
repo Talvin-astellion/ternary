@@ -176,6 +176,36 @@ int main(void)
     assert(mmu_fault_cause == CAUSE_LOAD_PF);
     csr_write(0x180, 0);
 
+    memset(pmpcfg, 0, sizeof(pmpcfg));
+    memset(pmpaddr, 0, sizeof(pmpaddr));
+    csr_write(0x3b0, 0x201001ffu);
+    csr_write(0x3a0, 0x31u);
+    priv = 0;
+    satp = 0;
+    assert(pmp_check(0x80400000u, 4, ACCESS_LOAD));
+    assert(!pmp_check(0x80400000u, 4, ACCESS_STORE));
+    assert(!pmp_check(0x80400000u, 4, ACCESS_FETCH));
+    put32(0x80400000u, 0x12345678u);
+    assert(mem_load32(0x80400000u) == 0x12345678u);
+    mem_store32(0x80400000u, 0xdeadbeefu);
+    assert(mem_fault);
+
+    priv = 3;
+    assert(pmp_check(0x80400000u, 4, ACCESS_STORE));
+    priv = 0;
+    csr_write(0x3a0, 0x39u);
+    csr_write(0x3a0, 0x31u);
+    csr_write(0x3b0, 0u);
+    assert((pmpcfg[0] & 0xffu) == 0x39u);
+    assert(pmpaddr[0] == 0x201001ffu);
+
+    memset(pmpcfg, 0, sizeof(pmpcfg));
+    memset(pmpaddr, 0, sizeof(pmpaddr));
+    csr_write(0x3b0, 0x80400000u >> 2);
+    csr_write(0x3a0, 0x22u);
+    assert(pmp_check(0x80400000u, 4, ACCESS_STORE));
+    assert(!pmp_check(0x80400000u, 4, ACCESS_LOAD));
+
     free(ram);
     return 0;
 }

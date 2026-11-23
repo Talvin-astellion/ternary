@@ -122,6 +122,7 @@
 #define TLB_SETS        128u
 #define TLB_WAYS        2u
 #define CAUSE_MISALIGNED 4
+#define CAUSE_INST_FAULT 1
 #define CAUSE_INST_PF   12
 #define CAUSE_LOAD_PF   13
 #define CAUSE_STORE_PF  15
@@ -144,6 +145,8 @@ static uint32_t sie;
 static uint32_t sip;
 static uint32_t scounteren;
 static uint32_t mcounteren;
+static uint32_t pmpcfg[4];
+static uint32_t pmpaddr[16];
 static uint32_t stvec;
 static uint32_t sepc;
 static uint32_t scause;
@@ -291,6 +294,58 @@ static inline int phys_in_ram(uint32_t addr)
 static inline int phys_in_ram_n(uint32_t addr, uint32_t size)
 {
     return addr >= RAM_BASE && (uint64_t)addr + size <= (uint64_t)RAM_BASE + RAM_SIZE;
+}
+
+static int pmp_locked(unsigned entry)
+{
+    return (pmpcfg[entry >> 2] >> (8u * (entry & 3u))) & 0x08u;
+}
+
+static int pmp_check(uint32_t pa, uint32_t size, enum MemAccess access)
+{
+    uint32_t need = access == ACCESS_LOAD ? 0x01u :
+                    access == ACCESS_STORE ? 0x02u : 0x04u;
+    unsigned i;
+
+    if (priv == 3 || size == 0)
+        return 1;
+    for (i = 0; i < 16u; i++) {
+        uint32_t cfg = (pmpcfg[i >> 2] >> (8u * (i & 3u))) & 0xffu;
+        unsigned mode = (cfg >> 4) & 3u;
+        uint64_t base, end;
+
+        if (mode == 0)
+            continue;
+        if (mode == 1) {
+            base = i ? (uint64_t)pmpaddr[i - 1] << 2 : 0;
+            end = (uint64_t)pmpaddr[i] << 2;
+        } else if (mode == 2) {
+            base = (uint64_t)pmpaddr[i] << 2;
+            end = base + 4;
+        } else {
+            uint32_t addr = pmpaddr[i];
+            unsigned ones = 0;
+
+            while (addr & 1u) {
+                ones++;
+                addr >>= 1;
+            }
+            if (ones == 0 || ones > 29)
+                continue;
+            base = (uint64_t)(pmpaddr[i] &
+                   ~((1u << (ones + 1)) - 1u)) << 2;
+            end = base + (1ULL << (ones + 3));
+        }
+        if ((uint64_t)pa >= base && (uint64_t)pa + size <= end)
+            return (cfg & need) != 0;
+    }
+    return 1;
+}
+
+static uint32_t pmp_fault_cause(enum MemAccess access)
+{
+    return access == ACCESS_FETCH ? CAUSE_INST_FAULT :
+           access == ACCESS_STORE ? CAUSE_STORE : CAUSE_LOAD;
 }
 
 static uint8_t phys_load8(uint32_t addr)
@@ -469,6 +524,10 @@ static int tlb_lookup(uint32_t va, enum MemAccess access, uint32_t *pa_out)
             uint32_t updated = e->pte | PTE_A |
                                (access == ACCESS_STORE ? PTE_D : 0u);
 
+            if (!pmp_check(e->pte_addr, 4, ACCESS_STORE)) {
+                mmu_fault_cause = pmp_fault_cause(access);
+                return -1;
+            }
             if (phys_in_ram_n(e->pte_addr, 4))
                 phys_store32(e->pte_addr, updated);
             e->pte = updated;
@@ -525,6 +584,10 @@ static int translate_addr(uint32_t va, enum MemAccess access, uint32_t *pa_out)
     pte_addr = root + vpn1 * 4u;
     if (!phys_in_ram_n(pte_addr, 4))
         goto fail;
+    if (!pmp_check(pte_addr, 4, ACCESS_LOAD)) {
+        mmu_fault_cause = pmp_fault_cause(access);
+        return 0;
+    }
     pte = phys_load32(pte_addr);
     if (!(pte & PTE_V))
         goto fail;
@@ -535,6 +598,10 @@ static int translate_addr(uint32_t va, enum MemAccess access, uint32_t *pa_out)
         pte_addr = next + vpn0 * 4u;
         if (!phys_in_ram_n(pte_addr, 4))
             goto fail;
+        if (!pmp_check(pte_addr, 4, ACCESS_LOAD)) {
+            mmu_fault_cause = pmp_fault_cause(access);
+            return 0;
+        }
         pte = phys_load32(pte_addr);
         if (!(pte & PTE_V) || !(pte & PTE_RWX))
             goto fail;
@@ -558,6 +625,10 @@ static int translate_addr(uint32_t va, enum MemAccess access, uint32_t *pa_out)
         uint32_t updated = pte | PTE_A |
                            (access == ACCESS_STORE ? PTE_D : 0u);
 
+        if (!pmp_check(pte_addr, 4, ACCESS_STORE)) {
+            mmu_fault_cause = pmp_fault_cause(access);
+            return 0;
+        }
         if (phys_in_ram_n(pte_addr, 4))
             phys_store32(pte_addr, updated);
         pte = updated;
@@ -581,6 +652,10 @@ static uint8_t mem_load8_raw(uint32_t addr)
         return 0;
     if (!translate_addr(addr, ACCESS_LOAD, &pa))
         return 0;
+    if (!pmp_check(pa, 1, ACCESS_LOAD)) {
+        mem_fault = 1;
+        return 0;
+    }
     return phys_load8(pa);
 }
 
@@ -612,6 +687,10 @@ static uint32_t mem_load32(uint32_t addr)
     if (!(addr & 3u)) {
         if (!translate_addr(addr, ACCESS_LOAD, &pa))
             return 0;
+        if (!pmp_check(pa, 4, ACCESS_LOAD)) {
+            mem_fault = 1;
+            return 0;
+        }
         return phys_load32(pa);
     }
     v = mem_load8_raw(addr);
@@ -632,6 +711,10 @@ static void mem_store8_raw(uint32_t addr, uint8_t val)
         return;
     if (!translate_addr(addr, ACCESS_STORE, &pa))
         return;
+    if (!pmp_check(pa, 1, ACCESS_STORE)) {
+        mem_fault = 1;
+        return;
+    }
     phys_store8(pa, val);
 }
 
@@ -660,6 +743,10 @@ static void mem_store32(uint32_t addr, uint32_t val)
     if (!(addr & 3u)) {
         if (!translate_addr(addr, ACCESS_STORE, &pa))
             return;
+        if (!pmp_check(pa, 4, ACCESS_STORE)) {
+            mem_fault = 1;
+            return;
+        }
         if (in_test(pa)) {
             test_finisher(val);
             return;
@@ -701,6 +788,9 @@ static void fp_dirty(void);
 
 static int csr_valid(uint32_t csr)
 {
+    if ((csr >= 0x3a0u && csr <= 0x3a3u) ||
+        (csr >= 0x3b0u && csr <= 0x3bfu))
+        return 1;
     switch (csr) {
     case 0x001: case 0x002: case 0x003:
     case 0x100: case 0x104: case 0x105: case 0x106: case 0x140:
@@ -767,6 +857,10 @@ static int csr_user_enabled(uint32_t csr)
 
 static uint32_t csr_read(uint32_t csr)
 {
+    if (csr >= 0x3a0u && csr <= 0x3a3u)
+        return pmpcfg[csr - 0x3a0u];
+    if (csr >= 0x3b0u && csr <= 0x3bfu)
+        return pmpaddr[csr - 0x3b0u];
     switch (csr) {
     case 0x001: return fcsr & 0x1fu;
     case 0x002: return (fcsr >> 5) & 7u;
@@ -807,6 +901,26 @@ static uint32_t csr_read(uint32_t csr)
 
 static void csr_write(uint32_t csr, uint32_t val)
 {
+    if (csr >= 0x3a0u && csr <= 0x3a3u) {
+        unsigned base = (csr - 0x3a0u) * 4u;
+        unsigned i;
+
+        for (i = 0; i < 4u; i++) {
+            if (pmp_locked(base + i))
+                continue;
+            pmpcfg[csr - 0x3a0u] &= ~(0xffu << (8u * i));
+            pmpcfg[csr - 0x3a0u] |= (val & 0x3fu) << (8u * i);
+            val >>= 8;
+        }
+        return;
+    }
+    if (csr >= 0x3b0u && csr <= 0x3bfu) {
+        unsigned entry = csr - 0x3b0u;
+
+        if (!pmp_locked(entry))
+            pmpaddr[entry] = val;
+        return;
+    }
     switch (csr) {
     case 0x001:
         fcsr = (fcsr & 0xe0u) | (val & 0x1fu);
@@ -2553,6 +2667,10 @@ static int fetch_insn(uint32_t *inst, unsigned *len)
         fetch_fault(mmu_fault_cause ? mmu_fault_cause : CAUSE_INST_PF, pc);
         return 0;
     }
+    if (!pmp_check(lo_pa, 2, ACCESS_FETCH)) {
+        fetch_fault(CAUSE_INST_FAULT, pc);
+        return 0;
+    }
     lo = (uint16_t)(phys_load8(lo_pa) |
                     ((uint16_t)phys_load8(lo_pa + 1) << 8));
     if (mem_fault) {
@@ -2570,6 +2688,10 @@ static int fetch_insn(uint32_t *inst, unsigned *len)
     if (!translate_addr(pc + 2, ACCESS_FETCH, &hi_pa) ||
         !phys_in_ram_n(hi_pa, 2)) {
         fetch_fault(mmu_fault_cause ? mmu_fault_cause : CAUSE_INST_PF, pc);
+        return 0;
+    }
+    if (!pmp_check(hi_pa, 2, ACCESS_FETCH)) {
+        fetch_fault(CAUSE_INST_FAULT, pc);
         return 0;
     }
     hi = (uint16_t)(phys_load8(hi_pa) |
