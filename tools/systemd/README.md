@@ -87,13 +87,15 @@ Initramfs содержит:
 * `/init` → `/usr/lib/systemd/systemd`;
 * `/etc/initrd-release`, `default.target` → `initrd.target`;
 * `systemd-initrd-smoke.service` в `initrd.target.wants`, который печатает
-  `SYSTEMD_OK` в `/dev/console`;
+  `SYSTEMD_OK` в `/dev/console` и инициирует `reboot(RB_POWER_OFF)`;
 * `/proc`, `/sys`, `/dev`, `/run`, `/etc`, `/usr/lib`, необходимые `.so` и
   ELF-интерпретатор из sysroot.
 
 ## Проверка результата
 
-`systemd-run.sh` требует в логе `Linux version` и `SYSTEMD_OK`. Лог:
+`systemd-run.sh` требует в логе `Linux version` и `SYSTEMD_OK`, отсутствие
+`Kernel panic`/`SYSTEMD_POWEROFF_FAILED` и нулевой код выхода эмулятора.
+Таймаут или незавершённое выключение считаются ошибкой. Лог:
 `tools/systemd/build/emulator.log`. Если загрузка не доходит до systemd:
 
 ```bash
@@ -111,7 +113,9 @@ emu/tern-linux --kernel "$KERNEL_IMAGE" --dtb "$DTB" \
 * Нет host filesystem mount: всё, что нужно systemd, должно быть в initramfs;
   консоль — SBI DBCN.
 * Пайплайн останавливается в initrd: `switch-root` на внешний rootfs не
-  настраивается.
+  настраивается. Smoke-сервис выключает машину напрямую через
+  `reboot(RB_POWER_OFF)`, поэтому корректное завершение проверяется по коду
+  выхода эмулятора.
 * Сборка systemd с RV32 glibc требует готового кросс-sysroot; этот репозиторий
   не собирает glibc и не гарантирует, что все опции systemd доступны в конкретном
   checkout. Проверка `verify` показывает точную причину, если зависимостей нет.

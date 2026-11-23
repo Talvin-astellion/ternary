@@ -41,4 +41,17 @@ for marker in 'Linux version' 'SYSTEMD_OK'; do
     die "marker not found: $marker (log: $SD_LOG)"
 done
 
-log "systemd PID 1 OK: $SD_LOG (emulator rc=$rc)"
+for marker in 'SYSTEMD_POWEROFF_FAILED' 'Kernel panic'; do
+  if grep -q "$marker" "$SD_LOG"; then
+    die "unexpected marker: $marker (log: $SD_LOG)"
+  fi
+done
+
+if (( rc != 0 )); then
+  if (( rc == 124 )); then
+    die "emulator timed out after ${RUN_TIMEOUT}s without poweroff (log: $SD_LOG)"
+  fi
+  die "emulator exited with status $rc (log: $SD_LOG)"
+fi
+
+log "systemd PID 1 booted and powered off cleanly: $SD_LOG"

@@ -10,5 +10,6 @@
 - make -C emu sanitize
 - make -C work ternary-linux-isa → ISA/SBI PASS
 - make -C tools/systemd check → prerequisites report
-- make -C tools/systemd all → SYSTEMD_OK (with restored /tmp/opencode RV32 sysroot + MMU kernel)
+- make -C tools/systemd initrd → SYSTEMD_OK smoke payload
+- make -C tools/systemd run → SYSTEMD_OK + clean poweroff, emulator rc=0
 - git diff --check clean
