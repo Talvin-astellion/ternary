@@ -230,8 +230,10 @@ enabled, a tainted action adds `taint_penalty` to its risk score; with
 pages; `Bare` keeps the previous physical-address behaviour.  Access rights,
 `mstatus.SUM`/`MXR`, accessed/dirty bits and instruction/load/store page faults
 (causes 12/13/15) are emulated.  A 128-set, 2-way TLB caches successful
-translations; writes to `satp` and `sfence.vma` flush it, and permission checks
-still use the current `priv`/`mstatus` on every hit.  Supervisor fetches from
+translations; changes to the `satp` root/mode flush it, while ASID-only changes
+reuse ASID-tagged entries.  `sfence.vma` honors `rs1`/`rs2` for address/ASID-scoped
+invalidation, and permission checks still use the current `priv`/`mstatus` on
+every hit.  Supervisor fetches from
 user pages always fault, even when `SUM` is set, and 4 MiB leaves with a
 nonzero low PPN or a `W`-without-`R` mapping are rejected.  Multi-byte loads and
 stores stop at the first faulting byte, so a page-crossing access cannot hide

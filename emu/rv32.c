@@ -105,6 +105,8 @@
 #define FDT_END         9
 
 #define SATP_MODE_SV32  0x80000000u
+#define SATP_ASID_MASK  0x3ff00000u
+#define SATP_ASID_SHIFT 20
 #define SATP_PPN_MASK   0x003fffffu
 #define PTE_V           0x00000001u
 #define PTE_R           0x00000002u
@@ -377,6 +379,36 @@ static void tlb_flush(void)
 {
     memset(tlb, 0, sizeof(tlb));
     memset(tlb_next_way, 0, sizeof(tlb_next_way));
+}
+
+static void tlb_invalidate(uint32_t va, int has_va, uint32_t asid, int has_asid)
+{
+    unsigned set;
+    unsigned way;
+
+    for (set = 0; set < TLB_SETS; set++) {
+        for (way = 0; way < TLB_WAYS; way++) {
+            struct TlbEntry *e = &tlb[set][way];
+            uint32_t base_va;
+            uint32_t size;
+
+            if (!e->valid)
+                continue;
+            if (has_asid &&
+                ((e->satp & SATP_ASID_MASK) >> SATP_ASID_SHIFT) != (asid & 0x1ffu))
+                continue;
+            if (has_va) {
+                base_va = e->vpn << 12;
+                size = e->offset_mask + 1u;
+                if (e->offset_mask == 0x003fffffu)
+                    base_va &= ~0x003fffffu;
+                if ((uint64_t)va < base_va ||
+                    (uint64_t)va >= (uint64_t)base_va + size)
+                    continue;
+            }
+            e->valid = 0;
+        }
+    }
 }
 
 static int pte_allows(uint32_t pte, enum MemAccess access)
@@ -725,15 +757,19 @@ static void csr_write(uint32_t csr, uint32_t val)
     case 0x144:
         sip = (sip & SIP_STIP) | (val & ~SIP_STIP);
         break;
-    case 0x180:
+    case 0x180: {
+        uint32_t old_satp = satp;
+
         if ((val & 0xc0000000u) == 0)
             satp = 0;
         else if ((val & 0xc0000000u) == SATP_MODE_SV32)
-            satp = val & (SATP_MODE_SV32 | SATP_PPN_MASK);
+            satp = val & (SATP_MODE_SV32 | SATP_ASID_MASK | SATP_PPN_MASK);
         else if (debug_mmu)
             fprintf(stderr, "mmu: unsupported satp mode 0x%08x ignored\n", val);
-        tlb_flush();
+        if ((satp ^ old_satp) & ~SATP_ASID_MASK)
+            tlb_flush();
         break;
+    }
     case 0x300:
         mstatus = val & MSTATUS_MASK;
         sstatus = mstatus & SSTATUS_MASK;
@@ -1344,8 +1380,15 @@ static void execute(uint32_t inst, uint32_t cur_pc)
                 break;
             default:
                 if ((inst & 0xfe007fffu) == 0x12000073u) {
-                    /* sfence.vma */
-                    tlb_flush();
+                    unsigned rs1 = (inst >> 15) & 0x1fu;
+                    unsigned rs2 = (inst >> 20) & 0x1fu;
+
+                    if (priv == 0) {
+                        do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
+                        break;
+                    }
+                    tlb_invalidate(rs1 ? regs[rs1] : 0, rs1 != 0,
+                                   rs2 ? regs[rs2] : 0, rs2 != 0);
                     break;
                 }
                 do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
