@@ -6,6 +6,53 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 MODE="${1:-report}"
+
+if [[ "$MODE" == manifest ]]; then
+  MANIFEST="$(manifest_path)"
+  require_file "$MANIFEST"
+  require_file "$EMULATOR"
+  require_file "$KERNEL_IMAGE"
+  require_file "$DTB"
+  require_file "$SD_INITRAMFS"
+
+  manifest_field() {
+    sed -n "s/^$1=//p" "$MANIFEST" | head -n 1
+  }
+
+  verify_manifest_value() {
+    local key="$1" current="$2" expected
+
+    expected="$(manifest_field "$key")"
+    [[ -n "$expected" ]] || die "manifest missing $key in $MANIFEST"
+    if [[ "$expected" != "$current" ]]; then
+      die "manifest mismatch for $key (recorded: $expected, current: $current)"
+    fi
+    log "OK: manifest $key"
+  }
+
+  verify_manifest_sha() {
+    verify_manifest_value "$1_sha256" "$(sha256_of "$2")"
+  }
+
+  if [[ "$(manifest_field run_verified)" != 1 ]]; then
+    die "manifest does not describe a successful run: $MANIFEST"
+  fi
+
+  verify_manifest_sha emulator "$EMULATOR"
+  verify_manifest_sha kernel_image "$KERNEL_IMAGE"
+  verify_manifest_sha dtb "$DTB"
+  verify_manifest_sha initrd "$SD_INITRAMFS"
+  verify_manifest_value kernel_release "$(kernel_release)"
+  if command -v "$(cross_cc)" >/dev/null 2>&1; then
+    verify_manifest_value cross_cc_version "$(cross_cc_version)"
+  else
+    log "SKIP: manifest cross_cc_version (compiler not on PATH)"
+  fi
+
+  log "MANIFEST_OK"
+  exit 0
+fi
+
 missing=0
 
 check_path() {

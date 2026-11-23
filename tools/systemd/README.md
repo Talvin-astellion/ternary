@@ -46,7 +46,8 @@ make -C tools/systemd verify   # жёсткая проверка, exit 1 при 
 
 Переменные окружения: `SYSTEMD_SRC`, `LINUX_SRC`, `BUILD_DIR`,
 `CROSS_COMPILE`, `CROSS_SYSROOT`, `KERNEL_IMAGE`, `DTB`, `KERNEL_CONFIG`,
-`DTC`, `EMULATOR`, `KERNEL_ADDR`, `RUN_TIMEOUT`, `MAX_INSN`, `TIME_MODE`.
+`DTC`, `EMULATOR`, `KERNEL_ADDR`, `RUN_TIMEOUT`, `MAX_INSN`, `TIME_MODE`,
+`MANIFEST`.
 
 `DTB` по умолчанию указывает на `build/ternary-mmu.dtb`; цель `dtb` собирает его
 из `tools/systemd/dts/ternary-mmu.dts` с `mmu-type = "riscv,sv32"`.
@@ -76,11 +77,13 @@ make -C tools/systemd dtb     # Sv32 DTB в build/ternary-mmu.dtb
 make -C tools/systemd build   # meson cross build + install в build/sysroot
 make -C tools/systemd initrd  # systemd + libs + smoke unit → build/initramfs-systemd.cpio.gz
 make -C tools/systemd run     # загрузка под tern-linux, проверка SYSTEMD_OK
+make -C tools/systemd manifest        # build/manifest.txt для текущих артефактов
+make -C tools/systemd verify-manifest # сверка с последним успешным запуском
 ```
 
 Артефакты находятся в `tools/systemd/build/`: `ternary-mmu.dtb`,
 `meson-cross-rv32.txt`, `systemd/`, `sysroot/`, `initrd-root/`,
-`initramfs-systemd.cpio.gz`, `emulator.log`, `systemd.env`.
+`initramfs-systemd.cpio.gz`, `emulator.log`, `systemd.env`, `manifest.txt`.
 
 Initramfs содержит:
 
@@ -96,7 +99,16 @@ Initramfs содержит:
 `systemd-run.sh` требует в логе `Linux version` и `SYSTEMD_OK`, отсутствие
 `Kernel panic`/`SYSTEMD_POWEROFF_FAILED` и нулевой код выхода эмулятора.
 Таймаут или незавершённое выключение считаются ошибкой. Лог:
-`tools/systemd/build/emulator.log`. Если загрузка не доходит до systemd:
+`tools/systemd/build/emulator.log`.
+
+После успешного запуска пишется `build/manifest.txt` с SHA-256 эмулятора,
+ядра, DTB и initramfs, версией ядра/компилятора и путём sysroot.
+`verify-manifest` пересчитывает хэши текущих артефактов и падает при
+расхождении или если последний запуск не завершился успешно. Это фиксирует
+рабочую комбинацию ядра, systemd, sysroot и эмулятора; путь можно переопределить
+через `MANIFEST`.
+
+Если загрузка не доходит до systemd:
 
 ```bash
 emu/tern-linux --kernel "$KERNEL_IMAGE" --dtb "$DTB" \

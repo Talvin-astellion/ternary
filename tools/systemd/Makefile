@@ -1,12 +1,14 @@
 SD_TOOLS := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 SCRIPTS := $(SD_TOOLS)scripts
 
-.PHONY: help check verify dtb build initrd run all clean
+.PHONY: help check verify manifest verify-manifest dtb build initrd run all clean
 
 help:
 	@echo "Targets:"
 	@echo "  check   report systemd-initrd prerequisites (non-blocking)"
 	@echo "  verify  fail if prerequisites are missing"
+	@echo "  manifest         write the current artifact manifest"
+	@echo "  verify-manifest  compare artifacts against the last successful run"
 	@echo "  dtb     build the Sv32 DTB used by the emulator"
 	@echo "  build   cross-build systemd from ~/System/systemd"
 	@echo "  initrd  assemble systemd initramfs with PID 1 smoke unit"
@@ -18,6 +20,12 @@ check:
 
 verify:
 	bash "$(SCRIPTS)/systemd-check.sh" require
+
+manifest:
+	bash "$(SCRIPTS)/systemd-manifest.sh"
+
+verify-manifest:
+	bash "$(SCRIPTS)/systemd-check.sh" manifest
 
 dtb:
 	bash "$(SCRIPTS)/systemd-dtb.sh"

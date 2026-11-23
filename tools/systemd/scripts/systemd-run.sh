@@ -14,6 +14,8 @@ RUN_TIMEOUT="${RUN_TIMEOUT:-900}"
 MAX_INSN="${MAX_INSN:-20000000000}"
 TIME_MODE="${TIME_MODE:-inst}"
 KERNEL_ADDR="${KERNEL_ADDR:-0x80000000}"
+MANIFEST="$(manifest_path)"
+export MANIFEST RUN_TIMEOUT MAX_INSN TIME_MODE
 
 EMU_ARGS=(
   --kernel "$KERNEL_IMAGE"
@@ -30,6 +32,7 @@ elif [[ "$TIME_MODE" != host ]]; then
 fi
 
 mkdir -p "$BUILD_DIR"
+"$SCRIPT_DIR/systemd-manifest.sh"
 log "booting systemd initrd under $EMULATOR"
 set +e
 timeout "$RUN_TIMEOUT" "$EMULATOR" "${EMU_ARGS[@]}" > "$SD_LOG" 2>&1
@@ -54,4 +57,6 @@ if (( rc != 0 )); then
   die "emulator exited with status $rc (log: $SD_LOG)"
 fi
 
+"$SCRIPT_DIR/systemd-manifest.sh" verified
 log "systemd PID 1 booted and powered off cleanly: $SD_LOG"
+log "artifact manifest: $MANIFEST"

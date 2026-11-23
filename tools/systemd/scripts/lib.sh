@@ -57,6 +57,126 @@ cross_cc() {
   printf '%s' "${CROSS_COMPILE}gcc"
 }
 
+manifest_path() {
+  printf '%s' "${MANIFEST:-$BUILD_DIR/manifest.txt}"
+}
+
+sha256_of() {
+  require_file "$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    die "missing SHA-256 tool (sha256sum or shasum)"
+  fi
+}
+
+git_rev() {
+  if command -v git >/dev/null 2>&1 &&
+     git -C "$1" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git -C "$1" rev-parse HEAD 2>/dev/null || printf 'unknown'
+  else
+    printf 'unknown'
+  fi
+}
+
+git_dirty() {
+  if command -v git >/dev/null 2>&1 &&
+     git -C "$1" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    if [[ -n "$(git -C "$1" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
+      printf '1'
+    else
+      printf '0'
+    fi
+  else
+    printf 'unknown'
+  fi
+}
+
+kernel_release() {
+  local build release uts
+
+  build="$(dirname -- "$KERNEL_CONFIG")"
+  if [[ -f "$build/include/config/kernel.release" ]]; then
+    tr -d '\n' < "$build/include/config/kernel.release"
+    return 0
+  fi
+  uts="$build/include/generated/utsrelease.h"
+  if [[ -f "$uts" ]]; then
+    release="$(sed -n 's/^#define UTS_RELEASE "\(.*\)"/\1/p' "$uts" | head -n 1)"
+    if [[ -n "$release" ]]; then
+      printf '%s' "$release"
+      return 0
+    fi
+  fi
+  if [[ -f "$KERNEL_IMAGE" ]] && command -v strings >/dev/null 2>&1; then
+    release="$(strings -a "$KERNEL_IMAGE" | awk '/^Linux version / { print $3; exit }')"
+    if [[ -n "$release" ]]; then
+      printf '%s' "$release"
+      return 0
+    fi
+  fi
+  printf 'unknown'
+}
+
+systemd_version() {
+  local version=""
+
+  if [[ -f "$SYSTEMD_SRC/meson.version" ]]; then
+    version="$(tr -d '[:space:]' < "$SYSTEMD_SRC/meson.version")"
+  fi
+  if [[ -z "$version" && -f "$SYSTEMD_SRC/meson.build" ]]; then
+    version="$(awk '/^project\(/,/^\)/' "$SYSTEMD_SRC/meson.build" |
+      sed -n "s/^[[:space:]]*version[[:space:]]*:[[:space:]]*'\([^']*\)'.*/\1/p" |
+      head -n 1)"
+  fi
+  printf '%s' "${version:-unknown}"
+}
+
+cross_cc_version() {
+  local cc version
+
+  cc="$(cross_cc)"
+  if command -v "$cc" >/dev/null 2>&1; then
+    version="$("$cc" --version 2>/dev/null | head -n 1)"
+    printf '%s' "${version:-unknown}"
+  else
+    printf 'unknown'
+  fi
+}
+
+cross_sysroot_path() {
+  local cc
+
+  if [[ -n "$CROSS_SYSROOT" ]]; then
+    printf '%s' "$CROSS_SYSROOT"
+    return 0
+  fi
+  cc="$(cross_cc)"
+  if command -v "$cc" >/dev/null 2>&1; then
+    printf '%s' "$("$cc" -print-sysroot 2>/dev/null || printf 'unknown')"
+  else
+    printf 'unknown'
+  fi
+}
+
+sysroot_libc_path() {
+  local root="$1" path
+
+  [[ -n "$root" && "$root" != unknown ]] || return 1
+  for path in "$root/usr/lib32/ilp32/libc.so.6" \
+              "$root/lib32/ilp32/libc.so.6" \
+              "$root/usr/lib32/libc.so.6" \
+              "$root/lib/libc.so.6"; do
+    if [[ -f "$path" ]]; then
+      printf '%s' "$path"
+      return 0
+    fi
+  done
+  return 1
+}
+
 sd_export_env() {
   export SYSTEMD_SRC LINUX_SRC BUILD_DIR CROSS_COMPILE CROSS_SYSROOT
   export EMULATOR KERNEL_IMAGE DTB KERNEL_CONFIG MESON NINJA DTC
