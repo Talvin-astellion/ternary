@@ -17,6 +17,7 @@ KERNEL_CONFIG="${KERNEL_CONFIG:-$LINUX_SRC/work/build/ternary-linux-mmu/.config}
 MESON="${MESON:-meson}"
 NINJA="${NINJA:-ninja}"
 DTC="${DTC:-dtc}"
+RUN_MODE="${RUN_MODE:-initrd}"
 
 SD_BUILD="$BUILD_DIR/systemd"
 SD_SYSROOT="$BUILD_DIR/sysroot"
@@ -25,7 +26,7 @@ SD_INITRAMFS="${SD_INITRAMFS:-$BUILD_DIR/initramfs-systemd.cpio.gz}"
 SD_SWITCH_ROOT_ROOT="$BUILD_DIR/switch-root-root"
 SD_SWITCH_INITRD_ROOT="$BUILD_DIR/switch-root-initrd-root"
 SD_SWITCH_INITRAMFS="$BUILD_DIR/initramfs-switch-root.cpio.gz"
-SD_LOG="$BUILD_DIR/emulator.log"
+SD_LOG="${SD_LOG:-$BUILD_DIR/emulator-${RUN_MODE}.log}"
 
 log() {
   printf '[systemd-initrd] %s\n' "$*"
@@ -35,6 +36,11 @@ die() {
   printf '[systemd-initrd] ERROR: %s\n' "$*" >&2
   exit 1
 }
+
+case "$RUN_MODE" in
+  initrd|switch-root) ;;
+  *) die "RUN_MODE must be 'initrd' or 'switch-root'" ;;
+esac
 
 require_file() {
   [[ -f "$1" ]] || die "missing file: $1"
@@ -61,7 +67,17 @@ cross_cc() {
 }
 
 manifest_path() {
-  printf '%s' "${MANIFEST:-$BUILD_DIR/manifest.txt}"
+  printf '%s' "${MANIFEST:-$BUILD_DIR/manifest-${RUN_MODE}.txt}"
+}
+
+invalidate_manifest() {
+  local manifest tmp
+
+  manifest="$(manifest_path)"
+  mkdir -p "$(dirname -- "$manifest")"
+  tmp="$(mktemp "$manifest.tmp.XXXXXX")"
+  printf 'manifest_version=1\nrun_verified=0\nrun_mode=%s\n' "$RUN_MODE" > "$tmp"
+  mv -f "$tmp" "$manifest"
 }
 
 sha256_of() {
@@ -182,6 +198,6 @@ sysroot_libc_path() {
 
 sd_export_env() {
   export SYSTEMD_SRC LINUX_SRC BUILD_DIR CROSS_COMPILE CROSS_SYSROOT
-  export EMULATOR KERNEL_IMAGE DTB KERNEL_CONFIG MESON NINJA DTC
+  export EMULATOR KERNEL_IMAGE DTB KERNEL_CONFIG MESON NINJA DTC RUN_MODE
   export SD_BUILD SD_SYSROOT SD_INITRD_ROOT SD_INITRAMFS SD_LOG
 }

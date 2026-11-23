@@ -1,14 +1,15 @@
 SD_TOOLS := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 SCRIPTS := $(SD_TOOLS)scripts
 
-.PHONY: help check verify manifest verify-manifest dtb build initrd switch-root-initrd run run-switch-root all clean
+.PHONY: help check verify manifest verify-manifest verify-manifest-switch-root dtb build initrd switch-root-initrd run run-switch-root all clean
 
 help:
 	@echo "Targets:"
 	@echo "  check   report systemd-initrd prerequisites (non-blocking)"
 	@echo "  verify  fail if prerequisites are missing"
 	@echo "  manifest         write the current artifact manifest"
-	@echo "  verify-manifest  compare artifacts against the last successful run"
+	@echo "  verify-manifest  compare artifacts against the last successful initrd run"
+	@echo "  verify-manifest-switch-root  verify the last successful switch-root run"
 	@echo "  dtb     build the Sv32 DTB used by the emulator"
 	@echo "  build   cross-build systemd from ~/System/systemd"
 	@echo "  initrd  assemble systemd initramfs with PID 1 smoke unit"
@@ -28,6 +29,9 @@ manifest:
 
 verify-manifest:
 	bash "$(SCRIPTS)/systemd-check.sh" manifest
+
+verify-manifest-switch-root:
+	RUN_MODE=switch-root bash "$(SCRIPTS)/systemd-check.sh" manifest
 
 dtb:
 	bash "$(SCRIPTS)/systemd-dtb.sh"

@@ -26,6 +26,11 @@ config_sha="missing"
 if [[ -f "$KERNEL_CONFIG" ]]; then
   config_sha="$(sha256_of "$KERNEL_CONFIG")"
 fi
+required_markers="${REQUIRED_MARKERS:-SYSTEMD_OK}"
+log_sha="missing"
+if (( VERIFIED )) && [[ -f "$SD_LOG" ]]; then
+  log_sha="$(sha256_of "$SD_LOG")"
+fi
 
 {
   printf 'manifest_version=1\n'
@@ -45,6 +50,9 @@ fi
   printf 'dtb_sha256=%s\n' "$(sha256_of "$DTB")"
   printf 'initrd=%s\n' "$SD_INITRAMFS"
   printf 'initrd_sha256=%s\n' "$(sha256_of "$SD_INITRAMFS")"
+  printf 'log=%s\n' "$SD_LOG"
+  printf 'required_markers=%s\n' "$required_markers"
+  printf 'log_sha256=%s\n' "$log_sha"
   printf 'systemd_src=%s\n' "$SYSTEMD_SRC"
   printf 'systemd_git=%s\n' "$(git_rev "$SYSTEMD_SRC")"
   printf 'systemd_dirty=%s\n' "$(git_dirty "$SYSTEMD_SRC")"

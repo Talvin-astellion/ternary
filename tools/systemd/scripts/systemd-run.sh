@@ -5,6 +5,9 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
+export RUN_MODE
+invalidate_manifest
+
 require_file "$KERNEL_IMAGE"
 require_file "$DTB"
 require_file "$SD_INITRAMFS"
@@ -37,7 +40,7 @@ fi
 
 mkdir -p "$BUILD_DIR"
 "$SCRIPT_DIR/systemd-manifest.sh"
-log "booting systemd initrd under $EMULATOR"
+log "booting systemd initrd ($RUN_MODE) under $EMULATOR"
 set +e
 timeout "$RUN_TIMEOUT" "$EMULATOR" "${EMU_ARGS[@]}" > "$SD_LOG" 2>&1
 rc=$?
