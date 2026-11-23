@@ -237,7 +237,11 @@ every hit.  Supervisor fetches from
 user pages always fault, even when `SUM` is set, and 4 MiB leaves with a
 nonzero low PPN or a `W`-without-`R` mapping are rejected.  Multi-byte loads and
 stores stop at the first faulting byte, so a page-crossing access cannot hide
-an earlier translation fault.  CSR access is privilege checked: user mode may
+an earlier translation fault.  `lr.w`, `sc.w` and AMOs require natural 4-byte
+alignment; misaligned atomics raise a load-address-misaligned trap, the reserved
+`lr.w`/`sc.w` `aq=0,rl=1` encoding is illegal, and any successful store or AMO
+clears the local reservation.  `fence` and `fence.i` are no-ops in this single-core
+model.  CSR access is privilege checked: user mode may
 read `cycle`/`time`/`instret`, while supervisor/machine CSRs, unknown CSRs and
 writes to read-only CSRs raise illegal-instruction traps.  Supervisor interrupts
 honor direct/vectored `stvec`, prioritize external, timer, then software sources,

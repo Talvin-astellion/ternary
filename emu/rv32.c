@@ -118,6 +118,7 @@
 #define PTE_RWX         (PTE_R | PTE_W | PTE_X)
 #define TLB_SETS        128u
 #define TLB_WAYS        2u
+#define CAUSE_MISALIGNED 4
 #define CAUSE_INST_PF   12
 #define CAUSE_LOAD_PF   13
 #define CAUSE_STORE_PF  15
@@ -1287,6 +1288,15 @@ static void execute(uint32_t inst, uint32_t cur_pc)
             return;
         }
         addr = regs[rs1];
+        if (addr & 3u) {
+            do_trap(CAUSE_MISALIGNED, addr, 0, cur_pc);
+            return;
+        }
+        if (((inst >> 27) == 0x02u || (inst >> 27) == 0x03u) &&
+            ((inst >> 25) & 3u) == 2u) {
+            do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
+            return;
+        }
         mem_fault = 0;
         mmu_fault_cause = 0;
         old = mem_load32(addr);
@@ -1337,8 +1347,10 @@ static void execute(uint32_t inst, uint32_t cur_pc)
             if (mem_fault || mmu_fault_cause)
                 do_trap(mmu_fault_cause ? mmu_fault_cause : CAUSE_STORE,
                         addr, 0, cur_pc);
-            else
+            else {
+                reservation = ~0u;
                 set_reg(rd, old);
+            }
             break;
         }
         }
