@@ -7,6 +7,7 @@ SRCS=$(filter-out rv32.c,$(wildcard *$(SRCEXT)))
 STRIP=strip
 CC=gcc
 CFLAGS=-Wall -Ofast
+RV32_CFLAGS=-Wall -O1 -g -Wno-unused-function -fno-fast-math -frounding-math -fsignaling-nans
 LIBS=-lm
 #PREFIX=/usr/local
 #CONFIGDIR=/etc
@@ -33,7 +34,7 @@ linux: $(GUEST)
 
 $(GUEST): rv32.c
 	@echo "Generating $@"
-	$(CC) $(CFLAGS) rv32.c -o $@ $(LIBS)
+	$(CC) $(RV32_CFLAGS) rv32.c -o $@ $(LIBS)
 	$(STRIP) $@
 
 
@@ -119,31 +120,31 @@ test: $(TESTBIN) $(TMLTESTBIN) $(PHASE2TESTBIN)
 
 $(RV32TESTBIN): tests/test_rv32_mmu.c rv32.c
 	@echo "Generating $@"
-	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_mmu.c -o $@ $(LIBS)
+	$(CC) $(RV32_CFLAGS) tests/test_rv32_mmu.c -o $@ $(LIBS)
 
 $(RV32CSRTESTBIN): tests/test_rv32_csr.c rv32.c
 	@echo "Generating $@"
-	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_csr.c -o $@ $(LIBS)
+	$(CC) $(RV32_CFLAGS) tests/test_rv32_csr.c -o $@ $(LIBS)
 
 $(RV32TRAPTESTBIN): tests/test_rv32_trap.c rv32.c
 	@echo "Generating $@"
-	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_trap.c -o $@ $(LIBS)
+	$(CC) $(RV32_CFLAGS) tests/test_rv32_trap.c -o $@ $(LIBS)
 
 $(RV32TLBTESTBIN): tests/test_rv32_tlb.c rv32.c
 	@echo "Generating $@"
-	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_tlb.c -o $@ $(LIBS)
+	$(CC) $(RV32_CFLAGS) tests/test_rv32_tlb.c -o $@ $(LIBS)
 
 $(RV32AMOTESTBIN): tests/test_rv32_amo.c rv32.c
 	@echo "Generating $@"
-	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_amo.c -o $@ $(LIBS)
+	$(CC) $(RV32_CFLAGS) tests/test_rv32_amo.c -o $@ $(LIBS)
 
 $(RV32RVCTESTBIN): tests/test_rv32_rvc.c rv32.c
 	@echo "Generating $@"
-	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_rvc.c -o $@ $(LIBS)
+	$(CC) $(RV32_CFLAGS) tests/test_rv32_rvc.c -o $@ $(LIBS)
 
 $(RV32FPTESTBIN): tests/test_rv32_fpu.c rv32.c
 	@echo "Generating $@"
-	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_fpu.c -o $@ $(LIBS)
+	$(CC) $(RV32_CFLAGS) tests/test_rv32_fpu.c -o $@ $(LIBS)
 
 .PHONY: test-rv32
 test-rv32: $(RV32TESTBIN) $(RV32CSRTESTBIN) $(RV32TRAPTESTBIN) $(RV32TLBTESTBIN) $(RV32AMOTESTBIN) $(RV32RVCTESTBIN) $(RV32FPTESTBIN) $(GUEST)

@@ -124,6 +124,33 @@ static void test_fp_arithmetic(void)
     assert((uint32_t)fpr[4] == f32_bits(11.0f));
 }
 
+static void test_fp_subnormal(void)
+{
+    reset_cpu();
+    fpr[8] = 0x007fffffu;
+    fpr[9] = f32_bits(1.0f);
+    run(opfp(0x08, 9, 8, 0, 10));
+    assert(scause == 0);
+    assert((uint32_t)fpr[10] == 0x007fffffu);
+    assert(fcsr == 0);
+
+    reset_cpu();
+    fpr[8] = 0x00000001u;
+    fpr[9] = 0x00000001u;
+    run(opfp(0x00, 9, 8, 0, 10));
+    assert(scause == 0);
+    assert((uint32_t)fpr[10] == 0x00000002u);
+    assert(fcsr == 0);
+
+    reset_cpu();
+    fpr[8] = 1;
+    fpr[9] = f64_bits(1.0);
+    run(opfp(0x09, 9, 8, 0, 10));
+    assert(scause == 0);
+    assert(fpr[10] == 1);
+    assert(fcsr == 0);
+}
+
 static void test_fp_sign_minmax(void)
 {
     reset_cpu();
@@ -315,6 +342,7 @@ int main(void)
 
     test_fp_load_store();
     test_fp_arithmetic();
+    test_fp_subnormal();
     test_fp_sign_minmax();
     test_fp_convert();
     test_fp_compare_class();
