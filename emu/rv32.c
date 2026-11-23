@@ -54,16 +54,20 @@
 #define TEST_SIZE       0x1000u
 
 #define MSTATUS_SIE     (1u << 1)
+#define MSTATUS_MIE     (1u << 3)
 #define MSTATUS_SPIE    (1u << 5)
+#define MSTATUS_MPIE    (1u << 7)
 #define MSTATUS_SPP     (1u << 8)
+#define MSTATUS_MPP     (3u << 11)
 #define MSTATUS_FS      (3u << 13)
 #define MSTATUS_XS      (3u << 15)
 #define MSTATUS_SUM     (1u << 18)
 #define MSTATUS_MXR     (1u << 19)
 
-#define MSTATUS_MASK    (MSTATUS_SIE | MSTATUS_SPIE | MSTATUS_SPP | \
+#define SSTATUS_MASK    (MSTATUS_SIE | MSTATUS_SPIE | MSTATUS_SPP | \
                          MSTATUS_FS | MSTATUS_XS | MSTATUS_SUM | MSTATUS_MXR)
-#define SSTATUS_MASK    MSTATUS_MASK
+#define MSTATUS_MASK    (SSTATUS_MASK | MSTATUS_MIE | MSTATUS_MPIE | \
+                         MSTATUS_MPP)
 
 #define SIE_SSIE        (1u << 1)
 #define SIE_STIE        (1u << 5)
@@ -2575,7 +2579,17 @@ static void execute(uint32_t inst, uint32_t cur_pc)
                 mstatus = (mstatus & ~SSTATUS_MASK) | sstatus;
                 break;
             case 0x30200073: /* mret */
-                do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
+                if (priv != 3 || ((mstatus & MSTATUS_MPP) >> 11) == 2) {
+                    do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
+                    break;
+                }
+                pc = mepc;
+                priv = (mstatus & MSTATUS_MPP) >> 11;
+                mstatus = (mstatus & ~(MSTATUS_MIE | MSTATUS_MPIE |
+                                       MSTATUS_MPP)) |
+                          ((mstatus & MSTATUS_MPIE) ? MSTATUS_MIE : 0) |
+                          MSTATUS_MPIE;
+                sstatus = mstatus & SSTATUS_MASK;
                 break;
             case 0x10500073: /* wfi */
                 update_time();

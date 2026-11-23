@@ -27,6 +27,17 @@ static void reset_irq(void)
     debug_sbi = 0;
 }
 
+static void reset_mret(void)
+{
+    reset_irq();
+    priv = 3;
+    mepc = OLD_PC;
+    mcause = 0;
+    mtvec = VEC;
+    mstatus = 0;
+    sstatus = 0;
+}
+
 static void expect_irq(uint32_t cause, uint32_t vec)
 {
     assert(maybe_interrupt() == 1);
@@ -120,6 +131,33 @@ int main(void)
     assert(priv == 1);
     assert((sstatus & MSTATUS_SIE) != 0);
     assert((sstatus & MSTATUS_SPP) == 0);
+
+    reset_mret();
+    mstatus = MSTATUS_MPIE;
+    execute(0x30200073u, OLD_PC + 4u);
+    assert(pc == OLD_PC);
+    assert(priv == 0);
+    assert((mstatus & MSTATUS_MIE) != 0);
+    assert((mstatus & MSTATUS_MPIE) != 0);
+    assert((mstatus & MSTATUS_MPP) == 0);
+
+    reset_mret();
+    mstatus = 1u << 11;
+    execute(0x30200073u, OLD_PC + 4u);
+    assert(pc == OLD_PC);
+    assert(priv == 1);
+    assert((mstatus & MSTATUS_MIE) == 0);
+    assert((mstatus & MSTATUS_MPIE) != 0);
+    assert((mstatus & MSTATUS_MPP) == 0);
+
+    reset_mret();
+    mstatus = MSTATUS_MPP | MSTATUS_MPIE;
+    execute(0x30200073u, OLD_PC + 4u);
+    assert(pc == OLD_PC);
+    assert(priv == 3);
+    assert((mstatus & MSTATUS_MIE) != 0);
+    assert((mstatus & MSTATUS_MPIE) != 0);
+    assert((mstatus & MSTATUS_MPP) == 0);
 
     free(ram);
     return 0;

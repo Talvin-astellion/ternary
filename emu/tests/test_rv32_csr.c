@@ -135,6 +135,15 @@ int main(void)
     assert(mstatus == (MSTATUS_SUM | MSTATUS_MXR | MSTATUS_SPP));
     assert(sstatus == (MSTATUS_SUM | MSTATUS_MXR | MSTATUS_SPP));
 
+    reset_cpu(3);
+    inst = csr_op(1, 0x300, 1, 0);
+    regs[1] = MSTATUS_MIE | MSTATUS_MPIE | (1u << 11) | MSTATUS_SUM;
+    execute(inst, TEST_PC);
+    assert(scause == 0);
+    assert(mstatus == (MSTATUS_MIE | MSTATUS_MPIE | (1u << 11) |
+                       MSTATUS_SUM));
+    assert(sstatus == MSTATUS_SUM);
+
     reset_cpu(0);
     execute(0x10200073u, TEST_PC);
     assert(scause == CAUSE_ILLEGAL);
