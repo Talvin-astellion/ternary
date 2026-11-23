@@ -15,7 +15,7 @@
 * two-level page table walk, 4 KiB и 4 MiB страницы, биты `V/R/W/X/U/A/D`;
 * проверки прав для U/S-режима, `mstatus.SUM` и `mstatus.MXR`;
 * page-fault cause 12/13/15 с `stval` = виртуальный адрес;
-* `sfence.vma` (нет TLB, поэтому это no-op);
+* `sfence.vma` и сброс 128-set 2-way TLB при записи `satp`;
 * SBI DBCN использует физические адреса и не зависит от `satp`.
 
 Старый NOMMU-профиль продолжает работать: при `satp=0` трансляции нет.
@@ -47,8 +47,9 @@ make -C tools/systemd verify   # жёсткая проверка, exit 1 при 
 Переменные окружения: `SYSTEMD_SRC`, `LINUX_SRC`, `BUILD_DIR`,
 `CROSS_COMPILE`, `CROSS_SYSROOT`, `KERNEL_IMAGE`, `DTB`, `KERNEL_CONFIG`,
 `DTC`, `EMULATOR`, `KERNEL_ADDR`, `RUN_TIMEOUT`, `MAX_INSN`, `TIME_MODE`,
-`MANIFEST`, `STATS`. `STATS=1` добавляет `--stats` в аргументы эмулятора, и
-счётчики инструкций/Sv32 попадают в `emulator.log`.
+`MANIFEST`, `RUN_MODE`, `STATS`. `RUN_MODE` равен `initrd` или `switch-root` и
+выбирает отдельные файлы лога и манифеста. `STATS=1` добавляет `--stats` в
+аргументы эмулятора, и счётчики инструкций/Sv32 попадают в лог выбранного режима.
 
 `DTB` по умолчанию указывает на `build/ternary-mmu.dtb`; цель `dtb` собирает его
 из `tools/systemd/dts/ternary-mmu.dts` с `mmu-type = "riscv,sv32"`.
@@ -80,15 +81,17 @@ make -C tools/systemd initrd  # systemd + libs + smoke unit → build/initramfs-
 make -C tools/systemd run     # загрузка под tern-linux, проверка SYSTEMD_OK
 make -C tools/systemd switch-root-initrd  # initramfs с /newroot → build/initramfs-switch-root.cpio.gz
 make -C tools/systemd run-switch-root     # INITRD_OK → switch-root → SWITCH_ROOT_OK
-make -C tools/systemd manifest        # build/manifest.txt для текущих артефактов
-make -C tools/systemd verify-manifest # сверка с последним успешным запуском
+make -C tools/systemd manifest                    # build/manifest-initrd.txt
+make -C tools/systemd verify-manifest             # сверка успешного initrd-запуска
+make -C tools/systemd verify-manifest-switch-root # сверка успешного switch-root
 ```
 
 Артефакты находятся в `tools/systemd/build/`: `ternary-mmu.dtb`,
 `meson-cross-rv32.txt`, `systemd/`, `sysroot/`, `initrd-root/`,
 `initramfs-systemd.cpio.gz`, `switch-root-root/`, `switch-root-initrd-root/`,
-`initramfs-switch-root.cpio.gz`, `emulator.log`, `systemd.env`,
-`systemd-switch-root.env`, `manifest.txt`.
+`initramfs-switch-root.cpio.gz`, `emulator-initrd.log`,
+`emulator-switch-root.log`, `systemd.env`, `systemd-switch-root.env`,
+`manifest-initrd.txt`, `manifest-switch-root.txt`.
 
 Initramfs содержит:
 
@@ -112,16 +115,20 @@ Initramfs содержит:
 `systemd-run.sh` требует в логе `Linux version` и `SYSTEMD_OK`, отсутствие
 `Kernel panic`/`SYSTEMD_POWEROFF_FAILED` и нулевой код выхода эмулятора.
 `run-switch-root` проверяет отдельные строки `INITRD_OK` и `SWITCH_ROOT_OK`
-именно в этом порядке. После каждого режима можно запустить `verify-manifest`.
-Таймаут или незавершённое выключение считаются ошибкой. Лог:
-`tools/systemd/build/emulator.log`.
+именно в этом порядке. Таймаут или незавершённое выключение считаются ошибкой.
+Логи разделены по режимам: `build/emulator-initrd.log` и
+`build/emulator-switch-root.log`.
 
-После успешного запуска пишется `build/manifest.txt` с SHA-256 эмулятора,
-ядра, DTB и initramfs, версией ядра/компилятора и путём sysroot.
-`verify-manifest` пересчитывает хэши текущих артефактов и падает при
-расхождении или если последний запуск не завершился успешно. Это фиксирует
-рабочую комбинацию ядра, systemd, sysroot и эмулятора; путь можно переопределить
-через `MANIFEST`.
+В начале каждого запуска соответствующий манифест сбрасывается в
+`run_verified=0`, поэтому старый успешный результат не переживёт неудачный
+повтор. После успешного запуска пишется `build/manifest-initrd.txt` или
+`build/manifest-switch-root.txt` с SHA-256 эмулятора, ядра, DTB, initramfs и
+лога, версией ядра/компилятора, путём sysroot и ожидаемыми marker-строками.
+`verify-manifest` и `verify-manifest-switch-root` пересчитывают хэши текущих
+артефактов, проверяют git-ревизии репозитория и systemd, порядок marker-строк
+в логе и падают при расхождении или если последний запуск не был успешным.
+Это фиксирует рабочую комбинацию ядра, systemd, sysroot и эмулятора; путь можно
+переопределить через `MANIFEST`.
 
 Если загрузка не доходит до systemd:
 
