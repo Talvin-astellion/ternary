@@ -65,7 +65,12 @@ fi
 rm -f "$tmp_c"
 
 check_path "kernel Image" "$KERNEL_IMAGE" file
-check_path "emulator DTB" "$DTB" file
+if [[ -f "$DTB" ]]; then
+  log "OK: emulator DTB"
+else
+  log "MISSING: emulator DTB ($DTB); run make -C tools/systemd dtb"
+  missing=1
+fi
 
 if [[ -f "$KERNEL_CONFIG" ]]; then
   for option in CONFIG_MMU=y CONFIG_BLK_DEV_INITRD=y CONFIG_RD_GZIP=y \

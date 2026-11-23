@@ -86,7 +86,7 @@ Initramfs содержит:
 
 * `/init` → `/usr/lib/systemd/systemd`;
 * `/etc/initrd-release`, `default.target` → `initrd.target`;
-* `systemd-initrd-smoke.service` в `sysinit.target.wants`, который печатает
+* `systemd-initrd-smoke.service` в `initrd.target.wants`, который печатает
   `SYSTEMD_OK` в `/dev/console`;
 * `/proc`, `/sys`, `/dev`, `/run`, `/etc`, `/usr/lib`, необходимые `.so` и
   ELF-интерпретатор из sysroot.

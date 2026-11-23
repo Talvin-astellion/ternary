@@ -10,7 +10,5 @@
 - make -C emu sanitize
 - make -C work ternary-linux-isa → ISA/SBI PASS
 - make -C tools/systemd check → prerequisites report
+- make -C tools/systemd all → SYSTEMD_OK (with restored /tmp/opencode RV32 sysroot + MMU kernel)
 - git diff --check clean
-
-- Pending:
-- make -C tools/systemd all → SYSTEMD_OK (нужен RV32 glibc sysroot; локально нет кросс-компилятора/meson/ninja)
