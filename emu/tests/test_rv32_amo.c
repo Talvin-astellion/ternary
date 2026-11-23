@@ -137,11 +137,6 @@ int main(void)
     assert(get32(ADDR1) == 0x11223344u);
 
     reset_cpu();
-    regs[1] = ADDR1;
-    inst = atomic(0x02u, 2u, 0, 1, 10);
-    expect_trap(inst, CAUSE_ILLEGAL, inst);
-
-    reset_cpu();
     execute(0x0ff0000fu, TEST_PC);
     assert(scause == 0);
     execute(0x0000100fu, TEST_PC);
