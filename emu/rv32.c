@@ -143,6 +143,7 @@ static int priv;
 static uint32_t sie;
 static uint32_t sip;
 static uint32_t scounteren;
+static uint32_t mcounteren;
 static uint32_t stvec;
 static uint32_t sepc;
 static uint32_t scause;
@@ -744,12 +745,23 @@ static int csr_user_writable(uint32_t csr)
     return csr >= 0x001u && csr <= 0x003u;
 }
 
+static int csr_min_priv(uint32_t csr)
+{
+    if (csr <= 0x003u || (csr >= 0xc00u && csr <= 0xc82u))
+        return 0;
+    if (csr >= 0x100u && csr <= 0x180u)
+        return 1;
+    return 3;
+}
+
 static int csr_user_enabled(uint32_t csr)
 {
     if (!csr_user_ok(csr))
         return 0;
     if (csr >= 0xc00u && csr <= 0xc02u)
         return (scounteren >> (csr - 0xc00u)) & 1u;
+    if (csr >= 0xc80u && csr <= 0xc82u)
+        return (mcounteren >> (csr - 0xc80u)) & 1u;
     return 1;
 }
 
@@ -773,6 +785,7 @@ static uint32_t csr_read(uint32_t csr)
     case 0x301: return 0x40001129u; /* RV32, IMACFD */
     case 0x304: return mie;
     case 0x305: return mtvec;
+    case 0x306: return mcounteren;
     case 0x340: return mscratch;
     case 0x341: return mepc;
     case 0x342: return mcause;
@@ -840,6 +853,7 @@ static void csr_write(uint32_t csr, uint32_t val)
         break;
     case 0x304: mie = val & (SIE_SSIE | SIE_STIE | SIE_SEIE); break;
     case 0x305: mtvec = val & ~2u; break;
+    case 0x306: mcounteren = val & 7u; break;
     case 0x340: mscratch = val; break;
     case 0x341: mepc = val & ~3u; break;
     case 0x342: break;
@@ -2497,7 +2511,8 @@ static void execute(uint32_t inst, uint32_t cur_pc)
                 write = src != 0;
                 break;
             }
-            if (!csr_valid(csr) || (write && csr_readonly(csr)) ||
+            if (!csr_valid(csr) || priv < csr_min_priv(csr) ||
+                (write && csr_readonly(csr)) ||
                 (priv == 0 && (!csr_user_enabled(csr) ||
                                (write && !csr_user_writable(csr))))) {
                 do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);

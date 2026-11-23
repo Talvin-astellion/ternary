@@ -18,6 +18,7 @@ static void reset_cpu(int mode)
     sstatus = 0;
     mstatus = 0;
     scounteren = 0;
+    mcounteren = 0;
     sie = sip = 0;
     mie = mip = 0;
     regs[1] = 0;
@@ -56,7 +57,7 @@ int main(void)
     assert(sstatus == 0);
     assert(mstatus == 0);
 
-    reset_cpu(1);
+    reset_cpu(3);
     inst = csr_op(2, 0x301, 0, 10);
     execute(inst, TEST_PC);
     assert(scause == 0);
@@ -89,6 +90,26 @@ int main(void)
     assert(pc == 0);
 
     reset_cpu(0);
+    expect_illegal(csr_op(2, 0xc80, 0, 10));
+
+    reset_cpu(3);
+    regs[1] = 1;
+    inst = csr_op(1, 0x306, 1, 0);
+    execute(inst, TEST_PC);
+    assert(scause == 0);
+    assert(mcounteren == 1);
+
+    reset_cpu(0);
+    mcounteren = 1;
+    inst = csr_op(2, 0xc80, 0, 10);
+    execute(inst, TEST_PC);
+    assert(scause == 0);
+    assert(regs[10] == (uint32_t)(cycle >> 32));
+
+    reset_cpu(1);
+    expect_illegal(csr_op(1, 0x306, 1, 0));
+
+    reset_cpu(0);
     fcsr = 0;
     regs[1] = 0x1f;
     inst = csr_op(1, 0x003, 1, 0);
@@ -107,7 +128,7 @@ int main(void)
     assert(satp == 0);
 
     reset_cpu(1);
-    inst = csr_op(1, 0x300, 1, 0);
+    inst = csr_op(1, 0x100, 1, 0);
     regs[1] = MSTATUS_SUM | MSTATUS_MXR | MSTATUS_SPP | (1u << 3) | (1u << 11);
     execute(inst, TEST_PC);
     assert(scause == 0);
