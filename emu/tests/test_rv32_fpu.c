@@ -327,6 +327,24 @@ static void test_compressed_fp(void)
 
     reset_cpu();
     regs[2] = ADDR1;
+    put32(ADDR1 + 8, f32_bits(3.5f));
+    put32(ADDR1 + 64, f32_bits(4.5f));
+    assert(rv32c_expand(0x2422, &inst));
+    run(inst);
+    assert(scause == 0);
+    assert((uint32_t)fpr[8] == f32_bits(3.5f));
+
+    reset_cpu();
+    regs[2] = ADDR1;
+    put32(ADDR1 + 8, f32_bits(3.5f));
+    put32(ADDR1 + 64, f32_bits(4.5f));
+    assert(rv32c_expand(0x2406, &inst));
+    run(inst);
+    assert(scause == 0);
+    assert((uint32_t)fpr[8] == f32_bits(4.5f));
+
+    reset_cpu();
+    regs[2] = ADDR1;
     fpr[8] = f64_bits(9.5);
     assert(rv32c_expand(0xa022, &inst));
     run(inst);

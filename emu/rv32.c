@@ -1149,8 +1149,8 @@ static uint32_t c_swsp_imm(uint16_t c)
 static uint32_t c_fldsp_imm(uint16_t c)
 {
     return (((uint32_t)c >> 12) & 1u) << 5 |
-           (((uint32_t)c >> 4) & 3u) << 3 |
-           (((uint32_t)c >> 6) & 7u) << 6;
+           (((uint32_t)c >> 5) & 3u) << 3 |
+           (((uint32_t)c >> 2) & 7u) << 6;
 }
 
 static uint32_t c_fsdsp_imm(uint16_t c)
