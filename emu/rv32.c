@@ -736,6 +736,11 @@ static int csr_user_ok(uint32_t csr)
     }
 }
 
+static int csr_user_writable(uint32_t csr)
+{
+    return csr >= 0x001u && csr <= 0x003u;
+}
+
 static uint32_t csr_read(uint32_t csr)
 {
     switch (csr) {
@@ -2289,7 +2294,8 @@ static void execute(uint32_t inst, uint32_t cur_pc)
                 break;
             }
             if (!csr_valid(csr) || (write && csr_readonly(csr)) ||
-                (priv == 0 && (!csr_user_ok(csr) || write))) {
+                (priv == 0 && (!csr_user_ok(csr) ||
+                               (write && !csr_user_writable(csr))))) {
                 do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
                 break;
             }

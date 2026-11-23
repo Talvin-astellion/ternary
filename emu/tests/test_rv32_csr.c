@@ -77,6 +77,19 @@ int main(void)
     assert(pc == 0);
 
     reset_cpu(0);
+    fcsr = 0;
+    regs[1] = 0x1f;
+    inst = csr_op(1, 0x003, 1, 0);
+    execute(inst, TEST_PC);
+    assert(scause == 0);
+    assert(fcsr == 0x1f);
+    assert(pc == 0);
+
+    reset_cpu(0);
+    regs[1] = 1;
+    expect_illegal(csr_op(1, 0xc00, 1, 0));
+
+    reset_cpu(0);
     inst = csr_op(1, 0x180, 1, 0);
     expect_illegal(inst);
     assert(satp == 0);
