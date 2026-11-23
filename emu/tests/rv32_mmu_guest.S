@@ -13,7 +13,7 @@ _start:
 	add	t2, t0, t2
 	sw	t1, 0(t2)
 
-	li	t1, 0x0004000f
+	li	t1, 0x0000000f
 	sw	t1, 0(t0)
 
 	la	t0, pg_l2
@@ -43,6 +43,23 @@ _start:
 	lw	t2, 0(t0)
 	bne	t1, t2, fail
 
+	la	t0, pg_root
+	li	t1, 0x20300019
+	li	t2, 0x80c
+	add	t2, t0, t2
+	sw	t1, 0(t2)
+	sfence.vma
+
+	la	t0, u_fetch_trap
+	csrw	stvec, t0
+	li	t0, 0x80c00000
+	jr	t0
+	j	fail
+
+u_fetch_trap:
+	csrr	t0, scause
+	li	t1, 12
+	bne	t0, t1, fail
 	li	t0, 0x5555
 	li	t1, 0x00100000
 	sw	t0, 0(t1)

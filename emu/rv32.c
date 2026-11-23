@@ -344,17 +344,25 @@ static int translate_addr(uint32_t va, enum MemAccess access, uint32_t *pa_out)
         pte = phys_load32(pte_addr);
         if (!(pte & PTE_V) || !(pte & PTE_RWX))
             goto fail;
+        if ((pte & PTE_W) && !(pte & PTE_R))
+            goto fail;
         pa = ((pte & 0xfffffc00u) << 2) | (va & 0xfffu);
     } else {
+        if ((pte & PTE_W) && !(pte & PTE_R))
+            goto fail;
+        if (pte & (0x3ffu << 10))
+            goto fail;
         pa = ((pte & 0xfffffc00u) << 2) | (va & 0x003fffffu);
     }
 
     if (priv == 0) {
         if (!(pte & PTE_U))
             goto fail;
-    } else if ((pte & PTE_U) && !(mstatus & MSTATUS_SUM) &&
-               access != ACCESS_FETCH) {
-        goto fail;
+    } else if (pte & PTE_U) {
+        if (access == ACCESS_FETCH)
+            goto fail;
+        if (!(mstatus & MSTATUS_SUM))
+            goto fail;
     }
 
     if (access == ACCESS_STORE) {
@@ -399,61 +407,107 @@ fail:
     return 0;
 }
 
-static uint8_t mem_load8(uint32_t addr)
+static uint8_t mem_load8_raw(uint32_t addr)
 {
     uint32_t pa;
 
-    mem_fault = 0;
+    if (mem_fault || mmu_fault_cause)
+        return 0;
     if (!translate_addr(addr, ACCESS_LOAD, &pa))
         return 0;
     return phys_load8(pa);
 }
 
+static uint8_t mem_load8(uint32_t addr)
+{
+    mem_fault = 0;
+    mmu_fault_cause = 0;
+    return mem_load8_raw(addr);
+}
+
 static uint16_t mem_load16(uint32_t addr)
 {
-    return (uint16_t)mem_load8(addr) |
-           ((uint16_t)mem_load8(addr + 1) << 8);
+    uint16_t v;
+
+    mem_fault = 0;
+    mmu_fault_cause = 0;
+    v = mem_load8_raw(addr);
+    if (!mem_fault && !mmu_fault_cause)
+        v |= (uint16_t)mem_load8_raw(addr + 1) << 8;
+    return v;
 }
 
 static uint32_t mem_load32(uint32_t addr)
 {
-    return (uint32_t)mem_load8(addr) |
-           ((uint32_t)mem_load8(addr + 1) << 8) |
-           ((uint32_t)mem_load8(addr + 2) << 16) |
-           ((uint32_t)mem_load8(addr + 3) << 24);
+    uint32_t pa, v;
+
+    mem_fault = 0;
+    mmu_fault_cause = 0;
+    if (!(addr & 3u)) {
+        if (!translate_addr(addr, ACCESS_LOAD, &pa))
+            return 0;
+        return phys_load32(pa);
+    }
+    v = mem_load8_raw(addr);
+    if (!mem_fault && !mmu_fault_cause)
+        v |= (uint32_t)mem_load8_raw(addr + 1) << 8;
+    if (!mem_fault && !mmu_fault_cause)
+        v |= (uint32_t)mem_load8_raw(addr + 2) << 16;
+    if (!mem_fault && !mmu_fault_cause)
+        v |= (uint32_t)mem_load8_raw(addr + 3) << 24;
+    return v;
 }
 
-static void mem_store8(uint32_t addr, uint8_t val)
+static void mem_store8_raw(uint32_t addr, uint8_t val)
 {
     uint32_t pa;
 
-    mem_fault = 0;
+    if (mem_fault || mmu_fault_cause)
+        return;
     if (!translate_addr(addr, ACCESS_STORE, &pa))
         return;
     phys_store8(pa, val);
 }
 
+static void mem_store8(uint32_t addr, uint8_t val)
+{
+    mem_fault = 0;
+    mmu_fault_cause = 0;
+    mem_store8_raw(addr, val);
+}
+
 static void mem_store16(uint32_t addr, uint16_t val)
 {
-    mem_store8(addr, val & 0xff);
-    mem_store8(addr + 1, val >> 8);
+    mem_fault = 0;
+    mmu_fault_cause = 0;
+    mem_store8_raw(addr, val & 0xff);
+    if (!mem_fault && !mmu_fault_cause)
+        mem_store8_raw(addr + 1, val >> 8);
 }
 
 static void mem_store32(uint32_t addr, uint32_t val)
 {
     uint32_t pa;
 
+    mem_fault = 0;
+    mmu_fault_cause = 0;
     if (!(addr & 3u)) {
-        mem_fault = 0;
-        if (translate_addr(addr, ACCESS_STORE, &pa) && in_test(pa)) {
+        if (!translate_addr(addr, ACCESS_STORE, &pa))
+            return;
+        if (in_test(pa)) {
             test_finisher(val);
             return;
         }
+        phys_store32(pa, val);
+        return;
     }
-    mem_store8(addr, val & 0xff);
-    mem_store8(addr + 1, (val >> 8) & 0xff);
-    mem_store8(addr + 2, (val >> 16) & 0xff);
-    mem_store8(addr + 3, (val >> 24) & 0xff);
+    mem_store8_raw(addr, val & 0xff);
+    if (!mem_fault && !mmu_fault_cause)
+        mem_store8_raw(addr + 1, (val >> 8) & 0xff);
+    if (!mem_fault && !mmu_fault_cause)
+        mem_store8_raw(addr + 2, (val >> 16) & 0xff);
+    if (!mem_fault && !mmu_fault_cause)
+        mem_store8_raw(addr + 3, (val >> 24) & 0xff);
 }
 
 static uint32_t csr_read(uint32_t csr)

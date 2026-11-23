@@ -62,11 +62,18 @@ int main(void)
     assert(mmu_fault_cause == CAUSE_LOAD_PF);
     mstatus |= MSTATUS_SUM;
     assert(xlate(0x80400123u, ACCESS_LOAD, &pa));
+    assert(!xlate(0x80400123u, ACCESS_FETCH, &pa));
+    assert(mmu_fault_cause == CAUSE_INST_PF);
     mstatus &= ~MSTATUS_SUM;
 
-    put32(ROOT_PA + 0x202u * 4u, (0x80b00u << 10) | PTE_V |
+    put32(ROOT_PA + 0x202u * 4u, (0x80800u << 10) | PTE_V |
           PTE_R | PTE_X | PTE_A);
     assert(xlate(0x80b00123u, ACCESS_FETCH, &pa) && pa == 0x80b00123u);
+
+    put32(ROOT_PA + 0x203u * 4u, (0x80b00u << 10) | PTE_V |
+          PTE_R | PTE_X | PTE_A);
+    assert(!xlate(0x80c00123u, ACCESS_FETCH, &pa));
+    assert(mmu_fault_cause == CAUSE_INST_PF);
 
     put32(l2_index1, (0x80400u << 10) | PTE_V | PTE_R | PTE_X | PTE_U);
     priv = 0;
@@ -95,6 +102,29 @@ int main(void)
     assert((get32(l2_index0) & PTE_A) != 0);
     assert(xlate(0x80400123u, ACCESS_STORE, &pa));
     assert((get32(l2_index0) & PTE_D) != 0);
+
+    put32(l2_index1, (0x80400u << 10) | PTE_V | PTE_W | PTE_U);
+    priv = 0;
+    assert(!xlate(0x80401123u, ACCESS_STORE, &pa));
+    assert(mmu_fault_cause == CAUSE_STORE_PF);
+    put32(l2_index1, 0);
+
+    put32(ROOT_PA + 0x203u * 4u, (0x80800u << 10) | PTE_V | PTE_W | PTE_U);
+    assert(!xlate(0x80c00123u, ACCESS_STORE, &pa));
+    assert(mmu_fault_cause == CAUSE_STORE_PF);
+
+    put32(l2_index0, (0x80400u << 10) | PTE_V | PTE_R | PTE_W | PTE_X |
+          PTE_U | PTE_A | PTE_D);
+    mem_fault = 0;
+    mmu_fault_cause = 0;
+    (void)mem_load32(0x80400ffeu);
+    assert(mmu_fault_cause == CAUSE_LOAD_PF);
+
+    mem_fault = 0;
+    mmu_fault_cause = 0;
+    mem_store32(0x80400ffeu, 0x11223344u);
+    assert(mmu_fault_cause == CAUSE_STORE_PF);
+    assert(mem_fault == 0);
 
     csr_write(0x180, 0xc0000000u);
     assert(satp == (SATP_MODE_SV32 | (0x80100u & SATP_PPN_MASK)));
