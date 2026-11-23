@@ -43,7 +43,10 @@ timeout "$RUN_TIMEOUT" "$EMULATOR" "${EMU_ARGS[@]}" > "$SD_LOG" 2>&1
 rc=$?
 set -e
 
-for marker in 'Linux version' 'SYSTEMD_OK'; do
+grep -q 'Linux version' "$SD_LOG" ||
+  die "marker not found: Linux version (log: $SD_LOG)"
+read -r -a required_markers <<< "${REQUIRED_MARKERS:-SYSTEMD_OK}"
+for marker in "${required_markers[@]}"; do
   grep -q "$marker" "$SD_LOG" ||
     die "marker not found: $marker (log: $SD_LOG)"
 done

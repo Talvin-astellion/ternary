@@ -1,7 +1,7 @@
 SD_TOOLS := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 SCRIPTS := $(SD_TOOLS)scripts
 
-.PHONY: help check verify manifest verify-manifest dtb build initrd run all clean
+.PHONY: help check verify manifest verify-manifest dtb build initrd switch-root-initrd run run-switch-root all clean
 
 help:
 	@echo "Targets:"
@@ -12,7 +12,9 @@ help:
 	@echo "  dtb     build the Sv32 DTB used by the emulator"
 	@echo "  build   cross-build systemd from ~/System/systemd"
 	@echo "  initrd  assemble systemd initramfs with PID 1 smoke unit"
+	@echo "  switch-root-initrd  assemble initramfs with a /newroot OS tree"
 	@echo "  run     boot the initramfs under emu/tern-linux"
+	@echo "  run-switch-root     boot and verify switch-root + new-root PID 1"
 	@echo "  all     build + initrd + run"
 
 check:
@@ -36,8 +38,14 @@ build: dtb
 initrd:
 	bash "$(SCRIPTS)/systemd-initrd.sh"
 
+switch-root-initrd: initrd
+	bash "$(SCRIPTS)/systemd-switch-root.sh"
+
 run:
 	bash "$(SCRIPTS)/systemd-run.sh"
+
+run-switch-root: switch-root-initrd
+	bash "$(SCRIPTS)/systemd-run-switch-root.sh"
 
 all: build initrd run
 

@@ -30,6 +30,7 @@ fi
 {
   printf 'manifest_version=1\n'
   printf 'run_verified=%s\n' "$VERIFIED"
+  printf 'run_mode=%s\n' "${RUN_MODE:-initrd}"
   printf 'generated_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf 'emulator=%s\n' "$EMULATOR"
   printf 'emulator_sha256=%s\n' "$(sha256_of "$EMULATOR")"

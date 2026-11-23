@@ -14,12 +14,24 @@ static void console_message(const char *msg)
     }
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
-    static const char ok[] = "SYSTEMD_OK\n";
     static const char failed[] = "SYSTEMD_POWEROFF_FAILED\n";
+    const char *marker = "SYSTEMD_OK";
+    int poweroff = 1;
+    int i;
 
-    console_message(ok);
+    for (i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--no-poweroff") == 0)
+            poweroff = 0;
+        else
+            marker = argv[i];
+    }
+
+    console_message(marker);
+    console_message("\n");
+    if (!poweroff)
+        return 0;
     sync();
     if (reboot(RB_POWER_OFF) != 0) {
         console_message(failed);

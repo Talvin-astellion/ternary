@@ -12,5 +12,6 @@
 - make -C tools/systemd check → prerequisites report
 - make -C tools/systemd initrd → SYSTEMD_OK smoke payload
 - make -C tools/systemd run → SYSTEMD_OK + clean poweroff, emulator rc=0
+- make -C tools/systemd run-switch-root → INITRD_OK + SWITCH_ROOT_OK + clean poweroff
 - make -C tools/systemd verify-manifest → MANIFEST_OK
 - git diff --check clean

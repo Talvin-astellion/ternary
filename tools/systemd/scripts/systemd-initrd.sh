@@ -7,6 +7,7 @@ SD_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 require_file "$SD_SYSROOT/usr/lib/systemd/systemd"
+require_file "$SD_SYSROOT/usr/bin/systemctl"
 require_tool awk
 require_tool cpio
 require_tool gzip
@@ -25,6 +26,8 @@ if [[ -f "$SD_SYSROOT/usr/lib/systemd/systemd-executor" ]]; then
   install -m 0755 "$SD_SYSROOT/usr/lib/systemd/systemd-executor" \
     "$SD_INITRD_ROOT/usr/lib/systemd/systemd-executor"
 fi
+install -m 0755 "$SD_SYSROOT/usr/bin/systemctl" \
+  "$SD_INITRD_ROOT/usr/bin/systemctl"
 
 "$(cross_cc)" $(cross_flags) -static -o "$SD_INITRD_ROOT/usr/bin/systemd-ok" \
   "$SD_ROOT/systemd-ok.c"
@@ -46,6 +49,7 @@ if [[ -n "$CROSS_SYSROOT" ]]; then
 fi
 
 declare -a queue=("$SD_INITRD_ROOT/usr/lib/systemd/systemd"
+                  "$SD_INITRD_ROOT/usr/bin/systemctl"
                   "$SD_INITRD_ROOT/usr/bin/systemd-ok")
 if [[ -f "$SD_INITRD_ROOT/usr/lib/systemd/systemd-executor" ]]; then
   queue+=("$SD_INITRD_ROOT/usr/lib/systemd/systemd-executor")

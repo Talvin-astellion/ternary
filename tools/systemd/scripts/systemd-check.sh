@@ -10,14 +10,19 @@ MODE="${1:-report}"
 if [[ "$MODE" == manifest ]]; then
   MANIFEST="$(manifest_path)"
   require_file "$MANIFEST"
-  require_file "$EMULATOR"
-  require_file "$KERNEL_IMAGE"
-  require_file "$DTB"
-  require_file "$SD_INITRAMFS"
 
   manifest_field() {
     sed -n "s/^$1=//p" "$MANIFEST" | head -n 1
   }
+
+  EMULATOR="$(manifest_field emulator)"
+  KERNEL_IMAGE="$(manifest_field kernel_image)"
+  DTB="$(manifest_field dtb)"
+  manifest_initrd="$(manifest_field initrd)"
+  for path in "$EMULATOR" "$KERNEL_IMAGE" "$DTB" "$manifest_initrd"; do
+    [[ -n "$path" ]] || die "manifest has an empty artifact path: $MANIFEST"
+    require_file "$path"
+  done
 
   verify_manifest_value() {
     local key="$1" current="$2" expected
@@ -41,7 +46,7 @@ if [[ "$MODE" == manifest ]]; then
   verify_manifest_sha emulator "$EMULATOR"
   verify_manifest_sha kernel_image "$KERNEL_IMAGE"
   verify_manifest_sha dtb "$DTB"
-  verify_manifest_sha initrd "$SD_INITRAMFS"
+  verify_manifest_sha initrd "$manifest_initrd"
   verify_manifest_value kernel_release "$(kernel_release)"
   if command -v "$(cross_cc)" >/dev/null 2>&1; then
     verify_manifest_value cross_cc_version "$(cross_cc_version)"

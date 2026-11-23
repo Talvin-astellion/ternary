@@ -78,13 +78,17 @@ make -C tools/systemd dtb     # Sv32 DTB в build/ternary-mmu.dtb
 make -C tools/systemd build   # meson cross build + install в build/sysroot
 make -C tools/systemd initrd  # systemd + libs + smoke unit → build/initramfs-systemd.cpio.gz
 make -C tools/systemd run     # загрузка под tern-linux, проверка SYSTEMD_OK
+make -C tools/systemd switch-root-initrd  # initramfs с /newroot → build/initramfs-switch-root.cpio.gz
+make -C tools/systemd run-switch-root     # INITRD_OK → switch-root → SWITCH_ROOT_OK
 make -C tools/systemd manifest        # build/manifest.txt для текущих артефактов
 make -C tools/systemd verify-manifest # сверка с последним успешным запуском
 ```
 
 Артефакты находятся в `tools/systemd/build/`: `ternary-mmu.dtb`,
 `meson-cross-rv32.txt`, `systemd/`, `sysroot/`, `initrd-root/`,
-`initramfs-systemd.cpio.gz`, `emulator.log`, `systemd.env`, `manifest.txt`.
+`initramfs-systemd.cpio.gz`, `switch-root-root/`, `switch-root-initrd-root/`,
+`initramfs-switch-root.cpio.gz`, `emulator.log`, `systemd.env`,
+`systemd-switch-root.env`, `manifest.txt`.
 
 Initramfs содержит:
 
@@ -95,10 +99,19 @@ Initramfs содержит:
 * `/proc`, `/sys`, `/dev`, `/run`, `/etc`, `/usr/lib`, необходимые `.so` и
   ELF-интерпретатор из sysroot.
 
+Вариант `initramfs-switch-root.cpio.gz` дополнительно содержит `/newroot` с
+полным OS tree (`/etc/os-release`, `/init`, собственный `default.target`) и
+`ternary-switch-root.service`, который вызывает
+`systemctl switch-root /newroot /init`. Initrd-сервис в этом варианте печатает
+`INITRD_OK` без выключения; сервис нового root печатает `SWITCH_ROOT_OK` и
+выключает машину. Файлы `/newroot` собраны жёсткими ссылками, чтобы образ не
+дублировал `.so` и не перекрывал DTB в RAM.
+
 ## Проверка результата
 
 `systemd-run.sh` требует в логе `Linux version` и `SYSTEMD_OK`, отсутствие
 `Kernel panic`/`SYSTEMD_POWEROFF_FAILED` и нулевой код выхода эмулятора.
+`run-switch-root` вместо этого требует `INITRD_OK` и `SWITCH_ROOT_OK`.
 Таймаут или незавершённое выключение считаются ошибкой. Лог:
 `tools/systemd/build/emulator.log`.
 
@@ -125,10 +138,10 @@ emu/tern-linux --kernel "$KERNEL_IMAGE" --dtb "$DTB" \
   не поддерживаются.
 * Нет host filesystem mount: всё, что нужно systemd, должно быть в initramfs;
   консоль — SBI DBCN.
-* Пайплайн останавливается в initrd: `switch-root` на внешний rootfs не
-  настраивается. Smoke-сервис выключает машину напрямую через
-  `reboot(RB_POWER_OFF)`, поэтому корректное завершение проверяется по коду
-  выхода эмулятора.
+* Внешнего блочного rootfs нет; `switch-root` проверяется на `/newroot`,
+  встроенном в initramfs. В обычном режиме smoke-сервис выключает машину
+  напрямую через `reboot(RB_POWER_OFF)`; в switch-root режиме это делает сервис
+  нового root. Корректное завершение проверяется по коду выхода эмулятора.
 * Сборка systemd с RV32 glibc требует готового кросс-sysroot; этот репозиторий
   не собирает glibc и не гарантирует, что все опции systemd доступны в конкретном
   checkout. Проверка `verify` показывает точную причину, если зависимостей нет.

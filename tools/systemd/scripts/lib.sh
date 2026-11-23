@@ -21,7 +21,10 @@ DTC="${DTC:-dtc}"
 SD_BUILD="$BUILD_DIR/systemd"
 SD_SYSROOT="$BUILD_DIR/sysroot"
 SD_INITRD_ROOT="$BUILD_DIR/initrd-root"
-SD_INITRAMFS="$BUILD_DIR/initramfs-systemd.cpio.gz"
+SD_INITRAMFS="${SD_INITRAMFS:-$BUILD_DIR/initramfs-systemd.cpio.gz}"
+SD_SWITCH_ROOT_ROOT="$BUILD_DIR/switch-root-root"
+SD_SWITCH_INITRD_ROOT="$BUILD_DIR/switch-root-initrd-root"
+SD_SWITCH_INITRAMFS="$BUILD_DIR/initramfs-switch-root.cpio.gz"
 SD_LOG="$BUILD_DIR/emulator.log"
 
 log() {
