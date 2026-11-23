@@ -9,6 +9,7 @@ CC=gcc
 CFLAGS=-Wall -Ofast
 RV32_CFLAGS=-Wall -O1 -g -Wno-unused-function -fno-fast-math -frounding-math -fsignaling-nans
 LIBS=-lm
+RV32_LIBS=$(LIBS) -lquadmath
 #PREFIX=/usr/local
 #CONFIGDIR=/etc
 DEPDIR=deps
@@ -34,7 +35,7 @@ linux: $(GUEST)
 
 $(GUEST): rv32.c
 	@echo "Generating $@"
-	$(CC) $(RV32_CFLAGS) rv32.c -o $@ $(LIBS)
+	$(CC) $(RV32_CFLAGS) rv32.c -o $@ $(RV32_LIBS)
 	$(STRIP) $@
 
 
@@ -120,31 +121,31 @@ test: $(TESTBIN) $(TMLTESTBIN) $(PHASE2TESTBIN)
 
 $(RV32TESTBIN): tests/test_rv32_mmu.c rv32.c
 	@echo "Generating $@"
-	$(CC) $(RV32_CFLAGS) tests/test_rv32_mmu.c -o $@ $(LIBS)
+	$(CC) $(RV32_CFLAGS) tests/test_rv32_mmu.c -o $@ $(RV32_LIBS)
 
 $(RV32CSRTESTBIN): tests/test_rv32_csr.c rv32.c
 	@echo "Generating $@"
-	$(CC) $(RV32_CFLAGS) tests/test_rv32_csr.c -o $@ $(LIBS)
+	$(CC) $(RV32_CFLAGS) tests/test_rv32_csr.c -o $@ $(RV32_LIBS)
 
 $(RV32TRAPTESTBIN): tests/test_rv32_trap.c rv32.c
 	@echo "Generating $@"
-	$(CC) $(RV32_CFLAGS) tests/test_rv32_trap.c -o $@ $(LIBS)
+	$(CC) $(RV32_CFLAGS) tests/test_rv32_trap.c -o $@ $(RV32_LIBS)
 
 $(RV32TLBTESTBIN): tests/test_rv32_tlb.c rv32.c
 	@echo "Generating $@"
-	$(CC) $(RV32_CFLAGS) tests/test_rv32_tlb.c -o $@ $(LIBS)
+	$(CC) $(RV32_CFLAGS) tests/test_rv32_tlb.c -o $@ $(RV32_LIBS)
 
 $(RV32AMOTESTBIN): tests/test_rv32_amo.c rv32.c
 	@echo "Generating $@"
-	$(CC) $(RV32_CFLAGS) tests/test_rv32_amo.c -o $@ $(LIBS)
+	$(CC) $(RV32_CFLAGS) tests/test_rv32_amo.c -o $@ $(RV32_LIBS)
 
 $(RV32RVCTESTBIN): tests/test_rv32_rvc.c rv32.c
 	@echo "Generating $@"
-	$(CC) $(RV32_CFLAGS) tests/test_rv32_rvc.c -o $@ $(LIBS)
+	$(CC) $(RV32_CFLAGS) tests/test_rv32_rvc.c -o $@ $(RV32_LIBS)
 
 $(RV32FPTESTBIN): tests/test_rv32_fpu.c rv32.c
 	@echo "Generating $@"
-	$(CC) $(RV32_CFLAGS) tests/test_rv32_fpu.c -o $@ $(LIBS)
+	$(CC) $(RV32_CFLAGS) tests/test_rv32_fpu.c -o $@ $(RV32_LIBS)
 
 .PHONY: test-rv32
 test-rv32: $(RV32TESTBIN) $(RV32CSRTESTBIN) $(RV32TRAPTESTBIN) $(RV32TLBTESTBIN) $(RV32AMOTESTBIN) $(RV32RVCTESTBIN) $(RV32FPTESTBIN) $(GUEST)

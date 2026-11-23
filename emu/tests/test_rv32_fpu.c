@@ -66,6 +66,13 @@ static uint32_t opfp(uint32_t funct7, uint32_t rs2, uint32_t rs1,
     return insn_r(funct7, rs2, rs1, funct3, rd, 0x53u);
 }
 
+static uint32_t opfp4(uint32_t opcode, uint32_t rs3, uint32_t rs2,
+                      uint32_t rs1, uint32_t rm, uint32_t rd)
+{
+    return (rs3 << 27) | (rs2 << 20) | (rs1 << 15) | (rm << 12) |
+           (rd << 7) | opcode;
+}
+
 static void test_fp_load_store(void)
 {
     reset_cpu();
@@ -122,6 +129,44 @@ static void test_fp_arithmetic(void)
     run(0x43u | (4u << 7) | (8u << 15) | (9u << 20) | (10u << 27));
     assert(scause == 0);
     assert((uint32_t)fpr[4] == f32_bits(11.0f));
+}
+
+static void test_fp_rounding(void)
+{
+    reset_cpu();
+    fpr[8] = f32_bits(1.0f);
+    fpr[9] = 0x33800000u;
+    run(opfp(0x00, 9, 8, 4, 10));
+    assert(scause == 0);
+    assert((uint32_t)fpr[10] == 0x3f800001u);
+
+    reset_cpu();
+    fpr[8] = f64_bits(1.0);
+    fpr[9] = 0x3ca0000000000000ULL;
+    run(opfp(0x01, 9, 8, 4, 10));
+    assert(scause == 0);
+    assert(fpr[10] == 0x3ff0000000000001ULL);
+
+    reset_cpu();
+    fpr[8] = f32_bits(1.0f);
+    fpr[9] = 0x33800000u;
+    fpr[10] = f32_bits(1.0f);
+    run(opfp4(0x43u, 10, 9, 8, 4, 11));
+    assert(scause == 0);
+    assert((uint32_t)fpr[11] == 0x3f800001u);
+
+    reset_cpu();
+    regs[8] = 0x01000001u;
+    run(opfp(0x68, 1, 8, 4, 10));
+    assert(scause == 0);
+    assert((uint32_t)fpr[10] == 0x4b800001u);
+
+    reset_cpu();
+    fcsr = 0x80u;
+    fpr[8] = f32_bits(2.5f);
+    run(opfp(0x60, 0, 8, 7, 10));
+    assert(scause == 0);
+    assert(regs[10] == 3);
 }
 
 static void test_fp_subnormal(void)
@@ -360,6 +405,7 @@ int main(void)
 
     test_fp_load_store();
     test_fp_arithmetic();
+    test_fp_rounding();
     test_fp_subnormal();
     test_fp_sign_minmax();
     test_fp_convert();

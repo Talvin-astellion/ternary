@@ -33,6 +33,7 @@
 #include <inttypes.h>
 #include <math.h>
 #include <poll.h>
+#include <quadmath.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -135,6 +136,7 @@ static uint8_t *ram;
 static uint32_t regs[32];
 static uint64_t fpr[32];
 static uint32_t fcsr;
+static uint32_t fp_rm;
 static uint32_t pc;
 static uint32_t sstatus;
 static int priv;
@@ -1045,6 +1047,7 @@ static int fp_begin(uint32_t rm)
         rm = (fcsr >> 5) & 7u;
     if (rm > 4)
         return -1;
+    fp_rm = rm;
     feclearexcept(FE_ALL_EXCEPT);
     switch (rm) {
     case 0: case 4: fesetround(FE_TONEAREST); break;
@@ -1067,6 +1070,157 @@ static void fp_end(void)
     if (e & FE_INEXACT) fcsr |= 0x01u;
     fp_dirty();
     fesetround(FE_TONEAREST);
+}
+
+static uint32_t rmm_f32(float rn, __float128 x)
+{
+    uint32_t bits = f32_bits(rn);
+    float up, down;
+    __float128 lo, hi, mid, rv;
+
+    if (!isfinite(rn) || !finiteq(x))
+        return bits;
+    rv = (__float128)rn;
+    if (x == rv)
+        return bits;
+    up = nextafterf(rn, INFINITY);
+    down = nextafterf(rn, -INFINITY);
+    if (isinf(up) || isinf(down))
+        return bits;
+    if (x > rv) {
+        lo = rv;
+        hi = (__float128)up;
+    } else {
+        lo = (__float128)down;
+        hi = rv;
+    }
+    mid = (lo + hi) / 2;
+    if (x != mid)
+        return bits;
+    return f32_bits(x > 0 ? up : down);
+}
+
+static uint64_t rmm_f64(double rn, __float128 x)
+{
+    uint64_t bits = f64_bits(rn);
+    double up, down;
+    __float128 lo, hi, mid, rv;
+
+    if (!isfinite(rn) || !finiteq(x))
+        return bits;
+    rv = (__float128)rn;
+    if (x == rv)
+        return bits;
+    up = nextafter(rn, INFINITY);
+    down = nextafter(rn, -INFINITY);
+    if (isinf(up) || isinf(down))
+        return bits;
+    if (x > rv) {
+        lo = rv;
+        hi = (__float128)up;
+    } else {
+        lo = (__float128)down;
+        hi = rv;
+    }
+    mid = (lo + hi) / 2;
+    if (x != mid)
+        return bits;
+    return f64_bits(x > 0 ? up : down);
+}
+
+static uint32_t fp_f32_op(float a, float b, float rn, uint32_t funct7)
+{
+    __float128 aq = a;
+    __float128 bq = b;
+    __float128 x;
+
+    if (fp_rm != 4)
+        return f32_bits(rn);
+    switch (funct7) {
+    case 0x00: x = aq + bq; break;
+    case 0x04: x = aq - bq; break;
+    case 0x08: x = aq * bq; break;
+    case 0x0c: x = aq / bq; break;
+    case 0x2c: x = sqrtq(aq); break;
+    default: return f32_bits(rn);
+    }
+    return rmm_f32(rn, x);
+}
+
+static uint64_t fp_f64_op(double a, double b, double rn, uint32_t funct7)
+{
+    __float128 aq = a;
+    __float128 bq = b;
+    __float128 x;
+
+    if (fp_rm != 4)
+        return f64_bits(rn);
+    switch (funct7) {
+    case 0x01: x = aq + bq; break;
+    case 0x05: x = aq - bq; break;
+    case 0x09: x = aq * bq; break;
+    case 0x0d: x = aq / bq; break;
+    case 0x2d: x = sqrtq(aq); break;
+    default: return f64_bits(rn);
+    }
+    return rmm_f64(rn, x);
+}
+
+static uint32_t fp_f32_fma(float a, float b, float c, float rn, uint32_t opcode)
+{
+    __float128 x;
+
+    if (fp_rm != 4)
+        return f32_bits(rn);
+    switch (opcode) {
+    case 0x43: x = fmaq((__float128)a, (__float128)b, (__float128)c); break;
+    case 0x47: x = fmaq((__float128)a, -(__float128)b, (__float128)c); break;
+    case 0x4b: x = fmaq(-(__float128)a, (__float128)b, (__float128)c); break;
+    case 0x4f: x = fmaq(-(__float128)a, -(__float128)b, (__float128)c); break;
+    default: return f32_bits(rn);
+    }
+    return rmm_f32(rn, x);
+}
+
+static uint64_t fp_f64_fma(double a, double b, double c, double rn, uint32_t opcode)
+{
+    __float128 x;
+
+    if (fp_rm != 4)
+        return f64_bits(rn);
+    switch (opcode) {
+    case 0x43: x = fmaq((__float128)a, (__float128)b, (__float128)c); break;
+    case 0x47: x = fmaq((__float128)a, -(__float128)b, (__float128)c); break;
+    case 0x4b: x = fmaq(-(__float128)a, (__float128)b, (__float128)c); break;
+    case 0x4f: x = fmaq(-(__float128)a, -(__float128)b, (__float128)c); break;
+    default: return f64_bits(rn);
+    }
+    return rmm_f64(rn, x);
+}
+
+static uint32_t fp_f32_from_i32(int32_t v, float rn)
+{
+    return fp_rm == 4 ? rmm_f32(rn, (__float128)v) : f32_bits(rn);
+}
+
+static uint32_t fp_f32_from_u32(uint32_t v, float rn)
+{
+    return fp_rm == 4 ? rmm_f32(rn, (__float128)v) : f32_bits(rn);
+}
+
+static uint64_t fp_f64_from_i32(int32_t v, double rn)
+{
+    return fp_rm == 4 ? rmm_f64(rn, (__float128)v) : f64_bits(rn);
+}
+
+static uint64_t fp_f64_from_u32(uint32_t v, double rn)
+{
+    return fp_rm == 4 ? rmm_f64(rn, (__float128)v) : f64_bits(rn);
+}
+
+static uint32_t fp_f32_from_f64(double v, float rn)
+{
+    return fp_rm == 4 ? rmm_f32(rn, (__float128)v) : f32_bits(rn);
 }
 
 static int32_t c_sext(uint32_t val, unsigned bits)
@@ -1609,9 +1763,35 @@ static uint32_t fp_fclass64(uint64_t bits)
     return 1u << (sign ? 1 : 6);
 }
 
-static int32_t fp_f32_to_i32(float v, uint32_t uns, uint32_t *invalid)
+static float fp_rint_f32(float v)
 {
     float r = rintf(v);
+    float d;
+
+    if (fp_rm != 4 || !isfinite(v))
+        return r;
+    d = v - r;
+    if ((d == 0.5f && v > 0.0f) || (d == -0.5f && v < 0.0f))
+        r = v > 0.0f ? r + 1.0f : r - 1.0f;
+    return r;
+}
+
+static double fp_rint_f64(double v)
+{
+    double r = rint(v);
+    double d;
+
+    if (fp_rm != 4 || !isfinite(v))
+        return r;
+    d = v - r;
+    if ((d == 0.5 && v > 0.0) || (d == -0.5 && v < 0.0))
+        r = v > 0.0 ? r + 1.0 : r - 1.0;
+    return r;
+}
+
+static int32_t fp_f32_to_i32(float v, uint32_t uns, uint32_t *invalid)
+{
+    float r = fp_rint_f32(v);
 
     if (isnan(v)) {
         *invalid = 1;
@@ -1633,7 +1813,7 @@ static int32_t fp_f32_to_i32(float v, uint32_t uns, uint32_t *invalid)
 
 static int32_t fp_f64_to_i32(double v, uint32_t uns, uint32_t *invalid)
 {
-    double r = rint(v);
+    double r = fp_rint_f64(v);
 
     if (isnan(v)) {
         *invalid = 1;
@@ -1728,8 +1908,8 @@ static void execute_fp(uint32_t inst, uint32_t cur_pc)
                       opcode == 0x47 ? fmaf(a, b, -c) :
                       opcode == 0x4b ? fmaf(-a, b, c) : fmaf(-a, b, -c);
 
-            if (isnan(v)) v = bits_f32(0x7fc00000u);
-            fpr[rd] = f32_bits(v);
+            fpr[rd] = fp_f32_fma(a, b, c, v, opcode);
+            if (isnan(v)) fpr[rd] = 0x7fc00000u;
         } else {
             double a = bits_f64(fpr[rs1]);
             double b = bits_f64(fpr[rs2]);
@@ -1738,8 +1918,8 @@ static void execute_fp(uint32_t inst, uint32_t cur_pc)
                        opcode == 0x47 ? fma(a, b, -c) :
                        opcode == 0x4b ? fma(-a, b, c) : fma(-a, b, -c);
 
-            if (isnan(v)) v = bits_f64(0x7ff8000000000000ULL);
-            fpr[rd] = f64_bits(v);
+            fpr[rd] = fp_f64_fma(a, b, c, v, opcode);
+            if (isnan(v)) fpr[rd] = 0x7ff8000000000000ULL;
         }
         fp_end();
         return;
@@ -1766,8 +1946,11 @@ static void execute_fp(uint32_t inst, uint32_t cur_pc)
         } else if ((funct7 == 0x2c) && rs2) break;
         if (fp_begin(funct3)) break;
         if (!(funct7 & 1)) {
-            fa = bits_f32(fpr[rs1]);
-            fb = bits_f32(fpr[rs2]);
+            float a = bits_f32(fpr[rs1]);
+            float b = bits_f32(fpr[rs2]);
+
+            fa = a;
+            fb = b;
             switch (funct7) {
             case 0x00: fa += fb; break;
             case 0x04: fa -= fb; break;
@@ -1775,11 +1958,14 @@ static void execute_fp(uint32_t inst, uint32_t cur_pc)
             case 0x0c: fa /= fb; break;
             case 0x2c: fa = sqrtf(fa); break;
             }
-            if (isnan(fa)) fa = bits_f32(0x7fc00000u);
-            fpr[rd] = f32_bits(fa);
+            fpr[rd] = fp_f32_op(a, b, fa, funct7);
+            if (isnan(fa)) fpr[rd] = 0x7fc00000u;
         } else {
-            da = bits_f64(fpr[rs1]);
-            db = bits_f64(fpr[rs2]);
+            double a = bits_f64(fpr[rs1]);
+            double b = bits_f64(fpr[rs2]);
+
+            da = a;
+            db = b;
             switch (funct7) {
             case 0x01: da += db; break;
             case 0x05: da -= db; break;
@@ -1787,8 +1973,8 @@ static void execute_fp(uint32_t inst, uint32_t cur_pc)
             case 0x0d: da /= db; break;
             case 0x2d: da = sqrt(da); break;
             }
-            if (isnan(da)) da = bits_f64(0x7ff8000000000000ULL);
-            fpr[rd] = f64_bits(da);
+            fpr[rd] = fp_f64_op(a, b, da, funct7);
+            if (isnan(da)) fpr[rd] = 0x7ff8000000000000ULL;
         }
         fp_end();
         return;
@@ -1821,13 +2007,17 @@ static void execute_fp(uint32_t inst, uint32_t cur_pc)
             fpr[rd] = fp_f64_minmax(fpr[rs1], fpr[rs2], funct3);
         fp_end();
         return;
-    case 0x20:
+    case 0x20: {
+        double src;
+
         if (rs2 != 1 || fp_begin(funct3)) break;
-        fa = (float)bits_f64(fpr[rs1]);
-        if (isnan(fa)) fa = bits_f32(0x7fc00000u);
-        fpr[rd] = f32_bits(fa);
+        src = bits_f64(fpr[rs1]);
+        fa = (float)src;
+        fpr[rd] = fp_f32_from_f64(src, fa);
+        if (isnan(fa)) fpr[rd] = 0x7fc00000u;
         fp_end();
         return;
+    }
     case 0x21:
         if (rs2 != 0 || fp_begin(funct3)) break;
         da = (double)bits_f32((uint32_t)fpr[rs1]);
@@ -1889,13 +2079,15 @@ static void execute_fp(uint32_t inst, uint32_t cur_pc)
                 fa = (float)(int32_t)regs[rs1];
             else
                 fa = (float)regs[rs1];
-            fpr[rd] = f32_bits(fa);
+            fpr[rd] = rs2 == 0 ? fp_f32_from_i32((int32_t)regs[rs1], fa) :
+                                 fp_f32_from_u32(regs[rs1], fa);
         } else {
             if (rs2 == 0)
                 da = (double)(int32_t)regs[rs1];
             else
                 da = (double)regs[rs1];
-            fpr[rd] = f64_bits(da);
+            fpr[rd] = rs2 == 0 ? fp_f64_from_i32((int32_t)regs[rs1], da) :
+                                 fp_f64_from_u32(regs[rs1], da);
         }
         fp_end();
         return;
