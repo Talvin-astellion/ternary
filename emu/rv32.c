@@ -158,6 +158,7 @@ static uint64_t sample_count;
 static int quiet;
 static int debug_sbi;
 static int debug_mmu;
+static int stats_enabled;
 static int mem_fault;
 static uint32_t mmu_fault_cause;
 static uint64_t mmu_walks;
@@ -216,6 +217,23 @@ static void update_time(void)
     clock_gettime(CLOCK_MONOTONIC, &ts);
     ns = (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
     guest_time = (ns - boot_ns) * timebase / 1000000000ull;
+}
+
+static void print_stats(void)
+{
+    struct timespec ts;
+    uint64_t now_ns, wall_ns;
+
+    update_time();
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    now_ns = (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+    wall_ns = now_ns >= boot_ns ? now_ns - boot_ns : 0;
+    fprintf(stderr,
+            "tern-linux: stats instret=%" PRIu64 " mmu_walks=%" PRIu64
+            " mmu_faults=%" PRIu64 " wall_ms=%" PRIu64
+            " guest_time=%" PRIu64 "\n",
+            instret, mmu_walks, mmu_faults,
+            (uint64_t)(wall_ns / 1000000ull), guest_time);
 }
 
 static inline int in_ram(uint32_t addr)
@@ -1329,6 +1347,7 @@ static void usage(const char *prog)
              "  --no-sleep          do not sleep in wfi\n"
              "  --debug-sbi         log SBI calls\n"
              "  --debug-mmu         log Sv32 translation faults and satp writes\n"
+             "  --stats             print instruction and MMU counters at exit\n"
              "  --quiet             suppress emulator diagnostics\n",
             prog, KERNEL_ADDR, DTB_ADDR, INITRD_ADDR, KERNEL_ADDR, timebase);
 }
@@ -1383,6 +1402,8 @@ int main(int argc, char **argv)
             debug_sbi = 1;
         } else if (!strcmp(argv[i], "--debug-mmu")) {
             debug_mmu = 1;
+        } else if (!strcmp(argv[i], "--stats")) {
+            stats_enabled = 1;
         } else if (!strcmp(argv[i], "--quiet")) {
             quiet = 1;
         } else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
@@ -1420,6 +1441,8 @@ int main(int argc, char **argv)
 
     clock_gettime(CLOCK_MONOTONIC, &ts);
     boot_ns = (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+    if (stats_enabled)
+        atexit(print_stats);
     guest_time = 0;
     regs[10] = 0;
     regs[11] = dtb ? dtb_addr : 0;

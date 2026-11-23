@@ -47,7 +47,8 @@ make -C tools/systemd verify   # жёсткая проверка, exit 1 при 
 Переменные окружения: `SYSTEMD_SRC`, `LINUX_SRC`, `BUILD_DIR`,
 `CROSS_COMPILE`, `CROSS_SYSROOT`, `KERNEL_IMAGE`, `DTB`, `KERNEL_CONFIG`,
 `DTC`, `EMULATOR`, `KERNEL_ADDR`, `RUN_TIMEOUT`, `MAX_INSN`, `TIME_MODE`,
-`MANIFEST`.
+`MANIFEST`, `STATS`. `STATS=1` добавляет `--stats` в аргументы эмулятора, и
+счётчики инструкций/Sv32 попадают в `emulator.log`.
 
 `DTB` по умолчанию указывает на `build/ternary-mmu.dtb`; цель `dtb` собирает его
 из `tools/systemd/dts/ternary-mmu.dts` с `mmu-type = "riscv,sv32"`.

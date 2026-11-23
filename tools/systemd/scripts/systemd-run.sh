@@ -13,6 +13,7 @@ require_file "$EMULATOR"
 RUN_TIMEOUT="${RUN_TIMEOUT:-900}"
 MAX_INSN="${MAX_INSN:-20000000000}"
 TIME_MODE="${TIME_MODE:-inst}"
+STATS="${STATS:-0}"
 KERNEL_ADDR="${KERNEL_ADDR:-0x80000000}"
 MANIFEST="$(manifest_path)"
 export MANIFEST RUN_TIMEOUT MAX_INSN TIME_MODE
@@ -29,6 +30,9 @@ if [[ "$TIME_MODE" == inst ]]; then
   EMU_ARGS+=(--time-inst)
 elif [[ "$TIME_MODE" != host ]]; then
   die "TIME_MODE must be 'host' or 'inst'"
+fi
+if [[ "$STATS" == 1 ]]; then
+  EMU_ARGS+=(--stats)
 fi
 
 mkdir -p "$BUILD_DIR"

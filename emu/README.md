@@ -234,7 +234,9 @@ Supervisor fetches from user pages always fault, even when `SUM` is set, and
 4 MiB leaves with a nonzero low PPN or a `W`-without-`R` mapping are rejected.
 Multi-byte loads and stores stop at the first faulting byte, so a page-crossing
 access cannot hide an earlier translation fault.  Use `--debug-mmu` to log
-translation failures.
+translation failures.  `--stats` prints retired instructions, Sv32 walks, page
+faults, wall time and guest time at exit; the walks/instruction ratio is the
+first signal for deciding whether a TLB is worth adding.
 
 The systemd-as-PID-1 pipeline builds a systemd initramfs for an MMU-enabled
 RV32 guest and boots it with `--initrd`.  See
