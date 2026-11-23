@@ -1327,41 +1327,80 @@ static void execute(uint32_t inst, uint32_t cur_pc)
     }
 }
 
-static int load_file(const char *path, uint32_t addr, size_t *size_out)
-{
-    FILE *f;
-    long size;
-    size_t got;
+struct BootImage {
+    const char *path;
+    uint32_t addr;
+    FILE *file;
+    size_t size;
+};
 
-    f = fopen(path, "rb");
-    if (!f) {
-        fprintf(stderr, "tern-linux: cannot open %s: %s\n", path, strerror(errno));
+static int open_boot_image(struct BootImage *image)
+{
+    long size;
+
+    image->file = fopen(image->path, "rb");
+    if (!image->file) {
+        fprintf(stderr, "tern-linux: cannot open %s: %s\n", image->path, strerror(errno));
         return -1;
     }
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
+    if (fseek(image->file, 0, SEEK_END) != 0 ||
+        (size = ftell(image->file)) < 0 || fseek(image->file, 0, SEEK_SET) != 0) {
+        fprintf(stderr, "tern-linux: cannot determine size of %s: %s\n",
+                image->path, strerror(errno));
         return -1;
     }
-    size = ftell(f);
-    if (size < 0) {
-        fclose(f);
+    if (image->addr < RAM_BASE || image->addr >= RAM_BASE + RAM_SIZE ||
+        (uint64_t)size > RAM_BASE + RAM_SIZE - image->addr) {
+        fprintf(stderr, "tern-linux: %s does not fit in RAM at 0x%08x\n",
+                image->path, image->addr);
         return -1;
     }
-    rewind(f);
-    if ((uint64_t)addr + (uint64_t)size > (uint64_t)RAM_BASE + RAM_SIZE) {
-        fprintf(stderr, "tern-linux: %s does not fit at 0x%08x\n", path, addr);
-        fclose(f);
-        return -1;
-    }
-    got = fread(ram + (addr - RAM_BASE), 1, (size_t)size, f);
-    fclose(f);
-    if (got != (size_t)size) {
-        fprintf(stderr, "tern-linux: short read of %s\n", path);
-        return -1;
-    }
-    if (size_out)
-        *size_out = got;
+    image->size = (size_t)size;
     return 0;
+}
+
+static int load_boot_images(struct BootImage *images, size_t count)
+{
+    int result = -1;
+
+    for (size_t i = 0; i < count; i++) {
+        struct BootImage *a = &images[i];
+
+        if (open_boot_image(a) != 0)
+            goto out;
+        for (size_t j = 0; j < i; j++) {
+            const struct BootImage *b = &images[j];
+
+            if (a->size && b->size && a->addr < b->addr + b->size &&
+                b->addr < a->addr + a->size) {
+                fprintf(stderr, "tern-linux: %s at 0x%08x overlaps %s at 0x%08x\n",
+                        a->path, a->addr, b->path, b->addr);
+                goto out;
+            }
+        }
+    }
+    ram = calloc(1, RAM_SIZE);
+    if (!ram) {
+        fprintf(stderr, "tern-linux: cannot allocate %u bytes of RAM\n", RAM_SIZE);
+        goto out;
+    }
+    for (size_t i = 0; i < count; i++) {
+        const struct BootImage *image = &images[i];
+
+        if (fread(ram + (image->addr - RAM_BASE), 1, image->size, image->file) != image->size) {
+            fprintf(stderr, "tern-linux: short read of %s\n", image->path);
+            free(ram);
+            ram = NULL;
+            goto out;
+        }
+    }
+    result = 0;
+out:
+    for (size_t i = 0; i < count; i++) {
+        if (images[i].file)
+            fclose(images[i].file);
+    }
+    return result;
 }
 
 static uint32_t be32(const uint8_t *p)
@@ -1378,16 +1417,16 @@ static void put_be32(uint8_t *p, uint32_t v)
     p[3] = v;
 }
 
-static void fdt_patch_u32(uint32_t dtb, const char *prop, uint32_t value)
+static void fdt_patch_u32(uint32_t dtb, size_t dtb_size, const char *prop, uint32_t value)
 {
     uint8_t *base = ram + (dtb - RAM_BASE);
     uint32_t total, off_struct, off_strings, pos, end;
     uint32_t len, nameoff;
     const char *name;
 
-    if (dtb < RAM_BASE || dtb + 40 > RAM_BASE + RAM_SIZE) {
+    if (dtb_size < 40) {
         if (debug_sbi)
-            fprintf(stderr, "fdt: dtb address 0x%08x out of range\n", dtb);
+            fprintf(stderr, "fdt: truncated header at 0x%08x\n", dtb);
         return;
     }
     if (be32(base) != FDT_MAGIC) {
@@ -1398,7 +1437,7 @@ static void fdt_patch_u32(uint32_t dtb, const char *prop, uint32_t value)
     total = be32(base + 4);
     off_struct = be32(base + 8);
     off_strings = be32(base + 12);
-    if (total > RAM_SIZE || off_struct >= total || off_strings >= total)
+    if (total > dtb_size || off_struct >= total || off_strings >= total)
         return;
     pos = off_struct;
     end = total;
@@ -1418,9 +1457,10 @@ static void fdt_patch_u32(uint32_t dtb, const char *prop, uint32_t value)
             len = be32(base + pos);
             nameoff = be32(base + pos + 4);
             pos += 8;
-            if (pos + len > end)
+            if (len > end - pos)
                 return;
-            if (off_strings + nameoff < end) {
+            if (nameoff < end - off_strings &&
+                memchr(base + off_strings + nameoff, '\0', end - off_strings - nameoff)) {
                 name = (const char *)(base + off_strings + nameoff);
                 if (debug_sbi && !strcmp(name, prop))
                     fprintf(stderr, "fdt: patch %s=0x%x\n", prop, value);
@@ -1443,6 +1483,8 @@ static void usage(const char *prog)
             "  --kernel-addr ADDR  load kernel at physical address (default 0x%08x)\n"
             "  --dtb FILE          load DTB at 0x%08x\n"
             "  --initrd FILE       load initramfs at 0x%08x\n"
+            "  --dtb-addr ADDR     override the DTB load address\n"
+            "  --initrd-addr ADDR  override the initramfs load address\n"
             "  --load ADDR FILE    load raw file at physical address\n"
             "  --pc ADDR           override entry point (default 0x%08x)\n"
             "  --max-insn N        stop after N instructions (0 = none)\n"
@@ -1458,6 +1500,21 @@ static void usage(const char *prog)
             prog, KERNEL_ADDR, DTB_ADDR, INITRD_ADDR, KERNEL_ADDR, timebase);
 }
 
+static int parse_boot_addr(const char *arg, uint32_t *addr)
+{
+    char *end;
+    unsigned long long value;
+
+    errno = 0;
+    value = strtoull(arg, &end, 0);
+    if (errno || arg[0] < '0' || arg[0] > '9' || *end || value > UINT32_MAX) {
+        fprintf(stderr, "tern-linux: invalid address: %s\n", arg);
+        return -1;
+    }
+    *addr = (uint32_t)value;
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     const char *kernel = NULL;
@@ -1468,28 +1525,40 @@ int main(int argc, char **argv)
     uint32_t kernel_addr = KERNEL_ADDR;
     uint32_t entry = KERNEL_ADDR;
     struct timespec ts;
+    struct BootImage *images = calloc((size_t)argc + 3, sizeof(*images));
+    size_t image_count = 0, dtb_index = 0, initrd_index = 0;
     int i;
 
+    if (!images) {
+        fprintf(stderr, "tern-linux: cannot allocate boot image list\n");
+        return 2;
+    }
     for (i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--kernel") && i + 1 < argc) {
             kernel = argv[++i];
         } else if (!strcmp(argv[i], "--kernel-addr") && i + 1 < argc) {
-            kernel_addr = (uint32_t)strtoul(argv[++i], NULL, 0);
+            if (parse_boot_addr(argv[++i], &kernel_addr) != 0)
+                goto invalid_args;
             entry = kernel_addr;
         } else if (!strcmp(argv[i], "--dtb") && i + 1 < argc) {
             dtb = argv[++i];
         } else if (!strcmp(argv[i], "--initrd") && i + 1 < argc) {
             initrd = argv[++i];
         } else if (!strcmp(argv[i], "--load") && i + 2 < argc) {
-            uint32_t addr = (uint32_t)strtoul(argv[++i], NULL, 0);
-            if (load_file(argv[++i], addr, NULL) != 0)
-                return 2;
+            uint32_t addr;
+
+            if (parse_boot_addr(argv[++i], &addr) != 0)
+                goto invalid_args;
+            images[image_count++] = (struct BootImage){ .path = argv[++i], .addr = addr };
         } else if (!strcmp(argv[i], "--pc") && i + 1 < argc) {
-            entry = (uint32_t)strtoul(argv[++i], NULL, 0);
+            if (parse_boot_addr(argv[++i], &entry) != 0)
+                goto invalid_args;
         } else if (!strcmp(argv[i], "--dtb-addr") && i + 1 < argc) {
-            dtb_addr = (uint32_t)strtoul(argv[++i], NULL, 0);
+            if (parse_boot_addr(argv[++i], &dtb_addr) != 0)
+                goto invalid_args;
         } else if (!strcmp(argv[i], "--initrd-addr") && i + 1 < argc) {
-            initrd_addr = (uint32_t)strtoul(argv[++i], NULL, 0);
+            if (parse_boot_addr(argv[++i], &initrd_addr) != 0)
+                goto invalid_args;
         } else if (!strcmp(argv[i], "--max-insn") && i + 1 < argc) {
             max_insn = strtoull(argv[++i], NULL, 0);
         } else if (!strcmp(argv[i], "--trace") && i + 1 < argc) {
@@ -1514,36 +1583,37 @@ int main(int argc, char **argv)
             quiet = 1;
         } else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
             usage(argv[0]);
+            free(images);
             return 0;
         } else {
             fprintf(stderr, "tern-linux: unknown argument %s\n", argv[i]);
             usage(argv[0]);
-            return 2;
+            goto invalid_args;
         }
     }
 
     if (!kernel) {
         usage(argv[0]);
-        return 2;
+        goto invalid_args;
     }
 
-    ram = calloc(1, RAM_SIZE);
-    if (!ram) {
-        fprintf(stderr, "tern-linux: cannot allocate %u bytes of RAM\n", RAM_SIZE);
-        return 2;
+    images[image_count++] = (struct BootImage){ .path = kernel, .addr = kernel_addr };
+    if (dtb) {
+        dtb_index = image_count;
+        images[image_count++] = (struct BootImage){ .path = dtb, .addr = dtb_addr };
     }
-
-    if (load_file(kernel, kernel_addr, NULL) != 0)
-        return 2;
-    if (dtb && load_file(dtb, dtb_addr, NULL) != 0)
-        return 2;
     if (initrd) {
-        size_t initrd_size = 0;
-        if (load_file(initrd, initrd_addr, &initrd_size) != 0)
-            return 2;
-        fdt_patch_u32(dtb_addr, "linux,initrd-start", initrd_addr);
-        fdt_patch_u32(dtb_addr, "linux,initrd-end", initrd_addr + (uint32_t)initrd_size);
+        initrd_index = image_count;
+        images[image_count++] = (struct BootImage){ .path = initrd, .addr = initrd_addr };
     }
+    if (load_boot_images(images, image_count) != 0)
+        goto invalid_args;
+    if (initrd && dtb) {
+        fdt_patch_u32(dtb_addr, images[dtb_index].size, "linux,initrd-start", initrd_addr);
+        fdt_patch_u32(dtb_addr, images[dtb_index].size, "linux,initrd-end",
+                      initrd_addr + (uint32_t)images[initrd_index].size);
+    }
+    free(images);
 
     clock_gettime(CLOCK_MONOTONIC, &ts);
     boot_ns = (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
@@ -1615,4 +1685,8 @@ int main(int argc, char **argv)
 
         execute(inst, cur_pc);
     }
+
+invalid_args:
+    free(images);
+    return 2;
 }

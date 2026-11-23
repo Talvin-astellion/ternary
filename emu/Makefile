@@ -116,8 +116,9 @@ $(RV32TESTBIN): tests/test_rv32_mmu.c rv32.c
 	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_mmu.c -o $@
 
 .PHONY: test-rv32
-test-rv32: $(RV32TESTBIN)
+test-rv32: $(RV32TESTBIN) $(GUEST)
 	./$(RV32TESTBIN)
+	python3 tests/test_rv32_images.py ./$(GUEST)
 
 RV32_CROSS?=riscv64-unknown-elf-
 RV32_GUEST_SRC=tests/rv32_mmu_guest.S tests/rv32_mmu_guest.ld

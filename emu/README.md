@@ -244,6 +244,10 @@ RV32 guest and boots it with `--initrd`.  See
 [`tools/systemd/README.md`](../tools/systemd/README.md) for prerequisites,
 kernel config and the complete workflow.
 
+`tern-linux` checks that the kernel, DTB, initramfs and any `--load` files fit
+in RAM without overlapping before loading them. Use `--dtb-addr` or
+`--initrd-addr` to select a different layout for larger images.
+
 ## Analysis tools
 
 ```sh
