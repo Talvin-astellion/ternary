@@ -1,4 +1,6 @@
 #include <assert.h>
+#include <fenv.h>
+#include <inttypes.h>
 #include <math.h>
 #include <string.h>
 
@@ -129,6 +131,309 @@ static void test_fp_arithmetic(void)
     run(0x43u | (4u << 7) | (8u << 15) | (9u << 20) | (10u << 27));
     assert(scause == 0);
     assert((uint32_t)fpr[4] == f32_bits(11.0f));
+}
+
+static uint32_t fuzz_next(uint32_t *state)
+{
+    uint32_t x = *state;
+
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    *state = x;
+    return x;
+}
+
+static uint32_t host_fp_flags(void)
+{
+    int e = fetestexcept(FE_INVALID | FE_DIVBYZERO | FE_OVERFLOW |
+                         FE_UNDERFLOW | FE_INEXACT);
+    uint32_t flags = 0;
+
+    if (e & FE_INVALID) flags |= 0x10u;
+    if (e & FE_DIVBYZERO) flags |= 0x08u;
+    if (e & FE_OVERFLOW) flags |= 0x04u;
+    if (e & FE_UNDERFLOW) flags |= 0x02u;
+    if (e & FE_INEXACT) flags |= 0x01u;
+    return flags;
+}
+
+static void host_set_round(uint32_t rm)
+{
+    switch (rm) {
+    case 0: case 4: fesetround(FE_TONEAREST); break;
+    case 1: fesetround(FE_TOWARDZERO); break;
+    case 2: fesetround(FE_DOWNWARD); break;
+    default: fesetround(FE_UPWARD); break;
+    }
+}
+
+static uint32_t oracle_rmm32(float rn, __float128 x)
+{
+    uint32_t bits = f32_bits(rn);
+    float up, down;
+    __float128 rv, lower, upper;
+
+    if (!isfinite(rn) || !finiteq(x))
+        return bits;
+    rv = (__float128)rn;
+    if (x == rv)
+        return bits;
+    up = nextafterf(rn, INFINITY);
+    down = nextafterf(rn, -INFINITY);
+    if (isinf(up) || isinf(down))
+        return bits;
+    lower = x < rv ? (__float128)down : rv;
+    upper = x < rv ? rv : (__float128)up;
+    if (x != (lower + upper) / 2)
+        return bits;
+    return f32_bits(x > 0 ? up : down);
+}
+
+static uint32_t oracle_f32(uint32_t a_bits, uint32_t b_bits, uint32_t rm,
+                           uint32_t funct7, uint32_t *flags)
+{
+    float a = bits_f32(a_bits);
+    float b = bits_f32(b_bits);
+    __float128 aq = a;
+    __float128 bq = b;
+    __float128 xq;
+    float v;
+    uint32_t result;
+
+    feclearexcept(FE_ALL_EXCEPT);
+    host_set_round(rm);
+    switch (funct7) {
+    case 0x00: v = a + b; break;
+    case 0x04: v = a - b; break;
+    case 0x08: v = a * b; break;
+    case 0x0c: v = a / b; break;
+    default: v = sqrtf(a); break;
+    }
+    *flags = host_fp_flags();
+    fesetround(FE_TONEAREST);
+    if (isnan(v))
+        return 0x7fc00000u;
+    result = f32_bits(v);
+    if (rm != 4)
+        return result;
+    feclearexcept(FE_ALL_EXCEPT);
+    switch (funct7) {
+    case 0x00: xq = aq + bq; break;
+    case 0x04: xq = aq - bq; break;
+    case 0x08: xq = aq * bq; break;
+    case 0x0c: xq = aq / bq; break;
+    default: xq = sqrtq(aq); break;
+    }
+    return oracle_rmm32(v, xq);
+}
+
+static uint32_t oracle_fma32(uint32_t a_bits, uint32_t b_bits,
+                             uint32_t c_bits, uint32_t opcode, uint32_t rm,
+                             uint32_t *flags)
+{
+    float a = bits_f32(a_bits);
+    float b = bits_f32(b_bits);
+    float c = bits_f32(c_bits);
+    __float128 aq = a;
+    __float128 bq = b;
+    __float128 cq = c;
+    __float128 xq;
+    float v;
+
+    feclearexcept(FE_ALL_EXCEPT);
+    host_set_round(rm);
+    switch (opcode) {
+    case 0x43: v = fmaf(a, b, c); break;
+    case 0x47: v = fmaf(a, b, -c); break;
+    case 0x4b: v = fmaf(-a, b, c); break;
+    default: v = fmaf(-a, b, -c); break;
+    }
+    *flags = host_fp_flags();
+    fesetround(FE_TONEAREST);
+    if (isnan(v))
+        return 0x7fc00000u;
+    if (rm != 4)
+        return f32_bits(v);
+    feclearexcept(FE_ALL_EXCEPT);
+    switch (opcode) {
+    case 0x43: xq = fmaq(aq, bq, cq); break;
+    case 0x47: xq = fmaq(aq, -bq, cq); break;
+    case 0x4b: xq = fmaq(-aq, bq, cq); break;
+    default: xq = fmaq(-aq, -bq, cq); break;
+    }
+    return oracle_rmm32(v, xq);
+}
+
+static uint64_t fuzz_next64(uint32_t *state)
+{
+    return ((uint64_t)fuzz_next(state) << 32) | fuzz_next(state);
+}
+
+static uint64_t oracle_rmm64(double rn, __float128 x)
+{
+    uint64_t bits = f64_bits(rn);
+    double up, down;
+    __float128 rv, lower, upper;
+
+    if (!isfinite(rn) || !finiteq(x))
+        return bits;
+    rv = (__float128)rn;
+    if (x == rv)
+        return bits;
+    up = nextafter(rn, INFINITY);
+    down = nextafter(rn, -INFINITY);
+    if (isinf(up) || isinf(down))
+        return bits;
+    lower = x < rv ? (__float128)down : rv;
+    upper = x < rv ? rv : (__float128)up;
+    if (x != (lower + upper) / 2)
+        return bits;
+    return f64_bits(x > 0 ? up : down);
+}
+
+static uint64_t oracle_f64(uint64_t a_bits, uint64_t b_bits, uint32_t rm,
+                           uint32_t funct7, uint32_t *flags)
+{
+    double a = bits_f64(a_bits);
+    double b = bits_f64(b_bits);
+    __float128 aq = a;
+    __float128 bq = b;
+    __float128 xq;
+    double v;
+    uint64_t result;
+
+    feclearexcept(FE_ALL_EXCEPT);
+    host_set_round(rm);
+    switch (funct7) {
+    case 0x01: v = a + b; break;
+    case 0x05: v = a - b; break;
+    case 0x09: v = a * b; break;
+    case 0x0d: v = a / b; break;
+    default: v = sqrt(a); break;
+    }
+    *flags = host_fp_flags();
+    fesetround(FE_TONEAREST);
+    if (isnan(v))
+        return 0x7ff8000000000000ULL;
+    result = f64_bits(v);
+    if (rm != 4)
+        return result;
+    feclearexcept(FE_ALL_EXCEPT);
+    switch (funct7) {
+    case 0x01: xq = aq + bq; break;
+    case 0x05: xq = aq - bq; break;
+    case 0x09: xq = aq * bq; break;
+    case 0x0d: xq = aq / bq; break;
+    default: xq = sqrtq(aq); break;
+    }
+    return oracle_rmm64(v, xq);
+}
+
+static void test_fp_diff_sweep(void)
+{
+    static const uint32_t ops[] = {0x00u, 0x04u, 0x08u, 0x0cu, 0x2cu};
+    uint32_t seed = 0x9e3779b9u;
+    unsigned op, rm, i;
+
+    for (op = 0; op < sizeof(ops) / sizeof(ops[0]); op++) {
+        for (rm = 0; rm < 5; rm++) {
+            for (i = 0; i < 160; i++) {
+                uint32_t a = fuzz_next(&seed);
+                uint32_t b = ops[op] == 0x2cu ? 0u : fuzz_next(&seed);
+                uint32_t rs2 = ops[op] == 0x2cu ? 0u : 9u;
+                uint32_t flags;
+                uint32_t expected = oracle_f32(a, b, rm, ops[op], &flags);
+
+                reset_cpu();
+                fpr[8] = a;
+                fpr[9] = b;
+                run(opfp(ops[op], rs2, 8, rm, 10));
+                if (scause != 0 || (uint32_t)fpr[10] != expected ||
+                    (fcsr & 0x1fu) != flags) {
+                    fprintf(stderr,
+                            "fp diff: op=%02x rm=%u a=%08x b=%08x "
+                            "got=%08x/%02x want=%08x/%02x scause=%u\n",
+                            ops[op], rm, a, b, (uint32_t)fpr[10],
+                            fcsr & 0x1fu, expected, flags, scause);
+                }
+                assert(scause == 0);
+                assert((uint32_t)fpr[10] == expected);
+                assert((fcsr & 0x1fu) == flags);
+            }
+        }
+    }
+
+    {
+        static const uint32_t fma_ops[] = {0x43u, 0x47u, 0x4bu, 0x4fu};
+        unsigned f;
+
+        for (f = 0; f < sizeof(fma_ops) / sizeof(fma_ops[0]); f++) {
+            for (rm = 0; rm < 5; rm++) {
+                for (i = 0; i < 96; i++) {
+                    uint32_t a = fuzz_next(&seed);
+                    uint32_t b = fuzz_next(&seed);
+                    uint32_t c = fuzz_next(&seed);
+                    uint32_t flags;
+                    uint32_t expected =
+                        oracle_fma32(a, b, c, fma_ops[f], rm, &flags);
+
+                    reset_cpu();
+                    fpr[8] = a;
+                    fpr[9] = b;
+                    fpr[10] = c;
+                    run(opfp4(fma_ops[f], 10, 9, 8, rm, 11));
+                    if (scause != 0 || (uint32_t)fpr[11] != expected ||
+                        (fcsr & 0x1fu) != flags) {
+                        fprintf(stderr,
+                                "fma diff: op=%02x rm=%u a=%08x b=%08x "
+                                "c=%08x got=%08x/%02x want=%08x/%02x "
+                                "scause=%u\n",
+                                fma_ops[f], rm, a, b, c, (uint32_t)fpr[11],
+                                fcsr & 0x1fu, expected, flags, scause);
+                    }
+                    assert(scause == 0);
+                    assert((uint32_t)fpr[11] == expected);
+                    assert((fcsr & 0x1fu) == flags);
+                }
+            }
+        }
+    }
+
+    {
+        static const uint32_t ops64[] = {0x01u, 0x05u, 0x09u, 0x0du, 0x2du};
+
+        for (op = 0; op < sizeof(ops64) / sizeof(ops64[0]); op++) {
+            for (rm = 0; rm < 5; rm++) {
+                for (i = 0; i < 160; i++) {
+                    uint64_t a = fuzz_next64(&seed);
+                    uint64_t b = ops64[op] == 0x2du ? 0u : fuzz_next64(&seed);
+                    uint32_t rs2 = ops64[op] == 0x2du ? 0u : 9u;
+                    uint32_t flags;
+                    uint64_t expected =
+                        oracle_f64(a, b, rm, ops64[op], &flags);
+
+                    reset_cpu();
+                    fpr[8] = a;
+                    fpr[9] = b;
+                    run(opfp(ops64[op], rs2, 8, rm, 10));
+                    if (scause != 0 || fpr[10] != expected ||
+                        (fcsr & 0x1fu) != flags) {
+                        fprintf(stderr,
+                                "fp64 diff: op=%02x rm=%u a=%016" PRIx64
+                                " b=%016" PRIx64 " got=%016" PRIx64
+                                "/%02x want=%016" PRIx64 "/%02x scause=%u\n",
+                                ops64[op], rm, a, b, fpr[10], fcsr & 0x1fu,
+                                expected, flags, scause);
+                    }
+                    assert(scause == 0);
+                    assert(fpr[10] == expected);
+                    assert((fcsr & 0x1fu) == flags);
+                }
+            }
+        }
+    }
+    fesetround(FE_TONEAREST);
 }
 
 static void test_fp_rounding(void)
@@ -405,6 +710,7 @@ int main(void)
 
     test_fp_load_store();
     test_fp_arithmetic();
+    test_fp_diff_sweep();
     test_fp_rounding();
     test_fp_subnormal();
     test_fp_sign_minmax();
