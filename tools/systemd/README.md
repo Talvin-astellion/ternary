@@ -111,7 +111,8 @@ Initramfs содержит:
 
 `systemd-run.sh` требует в логе `Linux version` и `SYSTEMD_OK`, отсутствие
 `Kernel panic`/`SYSTEMD_POWEROFF_FAILED` и нулевой код выхода эмулятора.
-`run-switch-root` вместо этого требует `INITRD_OK` и `SWITCH_ROOT_OK`.
+`run-switch-root` проверяет отдельные строки `INITRD_OK` и `SWITCH_ROOT_OK`
+именно в этом порядке. После каждого режима можно запустить `verify-manifest`.
 Таймаут или незавершённое выключение считаются ошибкой. Лог:
 `tools/systemd/build/emulator.log`.
 

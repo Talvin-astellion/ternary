@@ -46,9 +46,14 @@ set -e
 grep -q 'Linux version' "$SD_LOG" ||
   die "marker not found: Linux version (log: $SD_LOG)"
 read -r -a required_markers <<< "${REQUIRED_MARKERS:-SYSTEMD_OK}"
+previous_line=0
 for marker in "${required_markers[@]}"; do
-  grep -q "$marker" "$SD_LOG" ||
-    die "marker not found: $marker (log: $SD_LOG)"
+  marker_line="$(awk -v marker="$marker" -v after="$previous_line" '
+    NR > after { sub(/\r$/, ""); if ($0 == marker) { print NR; exit } }
+  ' "$SD_LOG")"
+  [[ -n "$marker_line" ]] ||
+    die "missing or out-of-order marker: $marker (log: $SD_LOG)"
+  previous_line="$marker_line"
 done
 
 for marker in 'SYSTEMD_POWEROFF_FAILED' 'Kernel panic'; do

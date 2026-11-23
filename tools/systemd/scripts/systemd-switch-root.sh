@@ -46,19 +46,12 @@ AllowIsolate=yes
 EOF
 ln -sfn ternary-switch-root.target "$SD_SWITCH_ROOT_ROOT/etc/systemd/system/default.target"
 
-cat > "$SD_SWITCH_INITRD_ROOT/etc/systemd/system/systemd-initrd-smoke.service" <<'EOF'
-[Unit]
-Description=Ternary systemd initrd smoke test
-DefaultDependencies=no
-After=initrd.target
-
+smoke_dropin="$SD_SWITCH_INITRD_ROOT/etc/systemd/system/systemd-initrd-smoke.service.d"
+mkdir -p "$smoke_dropin"
+cat > "$smoke_dropin/switch-root.conf" <<'EOF'
 [Service]
-Type=oneshot
+ExecStart=
 ExecStart=/usr/bin/systemd-ok INITRD_OK --no-poweroff
-RemainAfterExit=yes
-
-[Install]
-WantedBy=initrd.target
 EOF
 
 cat > "$SD_SWITCH_INITRD_ROOT/etc/systemd/system/ternary-switch-root.service" <<'EOF'
