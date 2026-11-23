@@ -17,6 +17,7 @@ static void reset_cpu(int mode)
     sepc = 0;
     sstatus = 0;
     mstatus = 0;
+    scounteren = 0;
     sie = sip = 0;
     mie = mip = 0;
     regs[1] = 0;
@@ -70,6 +71,17 @@ int main(void)
     expect_illegal(inst);
 
     reset_cpu(0);
+    expect_illegal(csr_op(2, 0xc00, 0, 10));
+
+    reset_cpu(1);
+    regs[1] = 7;
+    inst = csr_op(1, 0x106, 1, 0);
+    execute(inst, TEST_PC);
+    assert(scause == 0);
+    assert(scounteren == 7);
+
+    reset_cpu(0);
+    scounteren = 1;
     inst = csr_op(2, 0xc00, 0, 10);
     execute(inst, TEST_PC);
     assert(scause == 0);

@@ -140,6 +140,7 @@ static uint32_t sstatus;
 static int priv;
 static uint32_t sie;
 static uint32_t sip;
+static uint32_t scounteren;
 static uint32_t stvec;
 static uint32_t sepc;
 static uint32_t scause;
@@ -741,6 +742,15 @@ static int csr_user_writable(uint32_t csr)
     return csr >= 0x001u && csr <= 0x003u;
 }
 
+static int csr_user_enabled(uint32_t csr)
+{
+    if (!csr_user_ok(csr))
+        return 0;
+    if (csr >= 0xc00u && csr <= 0xc02u)
+        return (scounteren >> (csr - 0xc00u)) & 1u;
+    return 1;
+}
+
 static uint32_t csr_read(uint32_t csr)
 {
     switch (csr) {
@@ -750,6 +760,7 @@ static uint32_t csr_read(uint32_t csr)
     case 0x100: return sstatus;
     case 0x104: return sie;
     case 0x105: return stvec;
+    case 0x106: return scounteren;
     case 0x140: return sscratch;
     case 0x141: return sepc;
     case 0x142: return scause;
@@ -800,6 +811,7 @@ static void csr_write(uint32_t csr, uint32_t val)
         break;
     case 0x104: sie = val & (SIE_SSIE | SIE_STIE | SIE_SEIE); break;
     case 0x105: stvec = val & ~2u; break;
+    case 0x106: scounteren = val & 7u; break;
     case 0x140: sscratch = val; break;
     case 0x141: sepc = val & ~3u; break;
     case 0x142: break;
@@ -2294,7 +2306,7 @@ static void execute(uint32_t inst, uint32_t cur_pc)
                 break;
             }
             if (!csr_valid(csr) || (write && csr_readonly(csr)) ||
-                (priv == 0 && (!csr_user_ok(csr) ||
+                (priv == 0 && (!csr_user_enabled(csr) ||
                                (write && !csr_user_writable(csr))))) {
                 do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
                 break;
