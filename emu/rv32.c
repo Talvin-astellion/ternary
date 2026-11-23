@@ -111,6 +111,8 @@
 #define PTE_A           0x00000040u
 #define PTE_D           0x00000080u
 #define PTE_RWX         (PTE_R | PTE_W | PTE_X)
+#define TLB_SETS        128u
+#define TLB_WAYS        2u
 #define CAUSE_INST_PF   12
 #define CAUSE_LOAD_PF   13
 #define CAUSE_STORE_PF  15
@@ -163,6 +165,21 @@ static int mem_fault;
 static uint32_t mmu_fault_cause;
 static uint64_t mmu_walks;
 static uint64_t mmu_faults;
+static uint64_t tlb_hits;
+static uint64_t tlb_misses;
+
+struct TlbEntry {
+    uint32_t vpn;
+    uint32_t satp;
+    uint32_t base;
+    uint32_t pte;
+    uint32_t pte_addr;
+    uint32_t offset_mask;
+    uint8_t valid;
+};
+
+static struct TlbEntry tlb[TLB_SETS][TLB_WAYS];
+static uint8_t tlb_next_way[TLB_SETS];
 
 static void console_putc(uint8_t c)
 {
@@ -230,9 +247,10 @@ static void print_stats(void)
     wall_ns = now_ns >= boot_ns ? now_ns - boot_ns : 0;
     fprintf(stderr,
             "tern-linux: stats instret=%" PRIu64 " mmu_walks=%" PRIu64
-            " mmu_faults=%" PRIu64 " wall_ms=%" PRIu64
+            " mmu_faults=%" PRIu64 " tlb_hits=%" PRIu64
+            " tlb_misses=%" PRIu64 " wall_ms=%" PRIu64
             " guest_time=%" PRIu64 "\n",
-            instret, mmu_walks, mmu_faults,
+            instret, mmu_walks, mmu_faults, tlb_hits, tlb_misses,
             (uint64_t)(wall_ns / 1000000ull), guest_time);
 }
 
@@ -332,15 +350,129 @@ static void phys_store32(uint32_t addr, uint32_t val)
     phys_store8(addr + 3, (val >> 24) & 0xff);
 }
 
+static void mmu_page_fault(uint32_t va, enum MemAccess access,
+                           uint32_t pte, uint32_t pte_addr)
+{
+    mmu_faults++;
+    mmu_fault_cause = access == ACCESS_FETCH ? CAUSE_INST_PF :
+                      access == ACCESS_STORE ? CAUSE_STORE_PF : CAUSE_LOAD_PF;
+    if (debug_mmu) {
+        uint32_t root = (satp & SATP_PPN_MASK) << 12;
+
+        fprintf(stderr, "mmu: va=0x%08x access=%u satp=0x%08x pte=0x%08x@0x%08x cause=%u\n",
+                va, (unsigned)access, satp, pte, pte_addr, mmu_fault_cause);
+        for (uint32_t i = 0; i < 1024u; i++) {
+            uint32_t entry = phys_load32(root + i * 4u);
+            if (entry & PTE_V)
+                fprintf(stderr, "mmu: root[%03x]=0x%08x va=0x%08x\n",
+                        i, entry, i << 22);
+        }
+    }
+}
+
+static void tlb_flush(void)
+{
+    memset(tlb, 0, sizeof(tlb));
+    memset(tlb_next_way, 0, sizeof(tlb_next_way));
+}
+
+static int pte_allows(uint32_t pte, enum MemAccess access)
+{
+    uint32_t needed;
+
+    if (priv == 0) {
+        if (!(pte & PTE_U))
+            return 0;
+    } else if (pte & PTE_U) {
+        if (access == ACCESS_FETCH)
+            return 0;
+        if (!(mstatus & MSTATUS_SUM))
+            return 0;
+    }
+
+    if (access == ACCESS_STORE)
+        needed = PTE_W;
+    else if (access == ACCESS_FETCH)
+        needed = PTE_X;
+    else if ((pte & PTE_X) && !(pte & PTE_R) && (mstatus & MSTATUS_MXR))
+        needed = PTE_X;
+    else
+        needed = PTE_R;
+    return (pte & needed) != 0;
+}
+
+static int tlb_lookup(uint32_t va, enum MemAccess access, uint32_t *pa_out)
+{
+    unsigned set = (va >> 12) & (TLB_SETS - 1u);
+    unsigned way;
+    uint32_t vpn = va >> 12;
+    uint32_t denied_pte = 0, denied_pte_addr = 0;
+    int matched = 0;
+
+    for (way = 0; way < TLB_WAYS; way++) {
+        struct TlbEntry *e = &tlb[set][way];
+
+        if (!e->valid || e->vpn != vpn || e->satp != satp)
+            continue;
+        matched = 1;
+        if (!pte_allows(e->pte, access)) {
+            denied_pte = e->pte;
+            denied_pte_addr = e->pte_addr;
+            continue;
+        }
+        if (!(e->pte & PTE_A) ||
+            (access == ACCESS_STORE && !(e->pte & PTE_D))) {
+            uint32_t updated = e->pte | PTE_A |
+                               (access == ACCESS_STORE ? PTE_D : 0u);
+
+            if (phys_in_ram_n(e->pte_addr, 4))
+                phys_store32(e->pte_addr, updated);
+            e->pte = updated;
+        }
+        *pa_out = e->base | (va & e->offset_mask);
+        tlb_hits++;
+        mmu_fault_cause = 0;
+        return 1;
+    }
+    if (!matched) {
+        tlb_misses++;
+        return 0;
+    }
+    tlb_hits++;
+    mmu_page_fault(va, access, denied_pte, denied_pte_addr);
+    return -1;
+}
+
+static void tlb_fill(uint32_t va, uint32_t pte, uint32_t pte_addr,
+                     uint32_t base, uint32_t offset_mask)
+{
+    unsigned set = (va >> 12) & (TLB_SETS - 1u);
+    unsigned way = tlb_next_way[set] & (TLB_WAYS - 1u);
+    struct TlbEntry *e = &tlb[set][way];
+
+    tlb_next_way[set]++;
+    e->vpn = va >> 12;
+    e->satp = satp;
+    e->base = base;
+    e->pte = pte;
+    e->pte_addr = pte_addr;
+    e->offset_mask = offset_mask;
+    e->valid = 1;
+}
+
 static int translate_addr(uint32_t va, enum MemAccess access, uint32_t *pa_out)
 {
-    uint32_t root, pte_addr = 0, pte = 0, pa;
-    uint32_t vpn0, vpn1, needed;
+    uint32_t root, pte_addr = 0, pte = 0, base, offset_mask;
+    uint32_t vpn0, vpn1;
+    int lookup;
 
     if (!(satp & SATP_MODE_SV32)) {
         *pa_out = va;
         return 1;
     }
+    lookup = tlb_lookup(va, access, pa_out);
+    if (lookup != 0)
+        return lookup > 0;
 
     mmu_walks++;
     vpn1 = va >> 22;
@@ -364,35 +496,18 @@ static int translate_addr(uint32_t va, enum MemAccess access, uint32_t *pa_out)
             goto fail;
         if ((pte & PTE_W) && !(pte & PTE_R))
             goto fail;
-        pa = ((pte & 0xfffffc00u) << 2) | (va & 0xfffu);
+        base = (pte & 0xfffffc00u) << 2;
+        offset_mask = 0xfffu;
     } else {
         if ((pte & PTE_W) && !(pte & PTE_R))
             goto fail;
         if (pte & (0x3ffu << 10))
             goto fail;
-        pa = ((pte & 0xfffffc00u) << 2) | (va & 0x003fffffu);
+        base = (pte & 0xfffffc00u) << 2;
+        offset_mask = 0x003fffffu;
     }
 
-    if (priv == 0) {
-        if (!(pte & PTE_U))
-            goto fail;
-    } else if (pte & PTE_U) {
-        if (access == ACCESS_FETCH)
-            goto fail;
-        if (!(mstatus & MSTATUS_SUM))
-            goto fail;
-    }
-
-    if (access == ACCESS_STORE) {
-        needed = PTE_W;
-    } else if (access == ACCESS_FETCH) {
-        needed = PTE_X;
-    } else if ((pte & PTE_X) && !(pte & PTE_R) && (mstatus & MSTATUS_MXR)) {
-        needed = PTE_X;
-    } else {
-        needed = PTE_R;
-    }
-    if (!(pte & needed))
+    if (!pte_allows(pte, access))
         goto fail;
 
     if (!(pte & PTE_A) || (access == ACCESS_STORE && !(pte & PTE_D))) {
@@ -401,27 +516,16 @@ static int translate_addr(uint32_t va, enum MemAccess access, uint32_t *pa_out)
 
         if (phys_in_ram_n(pte_addr, 4))
             phys_store32(pte_addr, updated);
+        pte = updated;
     }
 
-    *pa_out = pa;
+    tlb_fill(va, pte, pte_addr, base, offset_mask);
+    *pa_out = base | (va & offset_mask);
     mmu_fault_cause = 0;
     return 1;
 
 fail:
-    mmu_faults++;
-    mmu_fault_cause = access == ACCESS_FETCH ? CAUSE_INST_PF :
-                      access == ACCESS_STORE ? CAUSE_STORE_PF : CAUSE_LOAD_PF;
-    if (debug_mmu) {
-        fprintf(stderr, "mmu: va=0x%08x access=%u satp=0x%08x pte=0x%08x@0x%08x cause=%u\n",
-                va, (unsigned)access, satp, pte, pte_addr, mmu_fault_cause);
-        root = (satp & SATP_PPN_MASK) << 12;
-        for (uint32_t i = 0; i < 1024u; i++) {
-            uint32_t entry = phys_load32(root + i * 4u);
-            if (entry & PTE_V)
-                fprintf(stderr, "mmu: root[%03x]=0x%08x va=0x%08x\n",
-                        i, entry, i << 22);
-        }
-    }
+    mmu_page_fault(va, access, pte, pte_addr);
     return 0;
 }
 
@@ -586,6 +690,7 @@ static void csr_write(uint32_t csr, uint32_t val)
             satp = val & (SATP_MODE_SV32 | SATP_PPN_MASK);
         else if (debug_mmu)
             fprintf(stderr, "mmu: unsupported satp mode 0x%08x ignored\n", val);
+        tlb_flush();
         break;
     case 0x300:
         mstatus = val;
@@ -1178,6 +1283,7 @@ static void execute(uint32_t inst, uint32_t cur_pc)
             default:
                 if ((inst & 0xfe007fffu) == 0x12000073u) {
                     /* sfence.vma */
+                    tlb_flush();
                     break;
                 }
                 do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);

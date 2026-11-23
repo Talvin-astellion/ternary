@@ -229,14 +229,15 @@ enabled, a tainted action adds `taint_penalty` to its risk score; with
 `satp` with mode `Sv32` enables two-level page tables with 4 KiB and 4 MiB
 pages; `Bare` keeps the previous physical-address behaviour.  Access rights,
 `mstatus.SUM`/`MXR`, accessed/dirty bits and instruction/load/store page faults
-(causes 12/13/15) are emulated.  `sfence.vma` is a no-op because there is no TLB.
-Supervisor fetches from user pages always fault, even when `SUM` is set, and
-4 MiB leaves with a nonzero low PPN or a `W`-without-`R` mapping are rejected.
-Multi-byte loads and stores stop at the first faulting byte, so a page-crossing
-access cannot hide an earlier translation fault.  Use `--debug-mmu` to log
-translation failures.  `--stats` prints retired instructions, Sv32 walks, page
-faults, wall time and guest time at exit; the walks/instruction ratio is the
-first signal for deciding whether a TLB is worth adding.
+(causes 12/13/15) are emulated.  A 128-set, 2-way TLB caches successful
+translations; writes to `satp` and `sfence.vma` flush it, and permission checks
+still use the current `priv`/`mstatus` on every hit.  Supervisor fetches from
+user pages always fault, even when `SUM` is set, and 4 MiB leaves with a
+nonzero low PPN or a `W`-without-`R` mapping are rejected.  Multi-byte loads and
+stores stop at the first faulting byte, so a page-crossing access cannot hide
+an earlier translation fault.  Use `--debug-mmu` to log translation failures.
+`--stats` prints retired instructions, Sv32 walks, TLB hits/misses, page faults,
+wall time and guest time at exit.
 
 The systemd-as-PID-1 pipeline builds a systemd initramfs for an MMU-enabled
 RV32 guest and boots it with `--initrd`.  See
