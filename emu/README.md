@@ -237,7 +237,9 @@ nonzero low PPN or a `W`-without-`R` mapping are rejected.  Multi-byte loads and
 stores stop at the first faulting byte, so a page-crossing access cannot hide
 an earlier translation fault.  CSR access is privilege checked: user mode may
 read `cycle`/`time`/`instret`, while supervisor/machine CSRs, unknown CSRs and
-writes to read-only CSRs raise illegal-instruction traps.  Use `--debug-mmu` to
+writes to read-only CSRs raise illegal-instruction traps.  Supervisor interrupts
+honor direct/vectored `stvec`, prioritize external, timer, then software sources,
+and wake `wfi` only when an enabled interrupt is pending.  Use `--debug-mmu` to
 log translation failures.
 `--stats` prints retired instructions, Sv32 walks, TLB hits/misses, page faults,
 wall time and guest time at exit.

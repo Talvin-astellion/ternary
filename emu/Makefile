@@ -72,6 +72,7 @@ TMLTESTBIN=test-tml
 PHASE2TESTBIN=test-phase2
 RV32TESTBIN=test-rv32-mmu
 RV32CSRTESTBIN=test-rv32-csr
+RV32TRAPTESTBIN=test-rv32-trap
 TEST_SRCS=tests/test_core.c $(CORE_SRCS)
 TML_TEST_SRCS=tests/test_tml.c $(CORE_SRCS)
 PHASE2_TEST_SRCS=tests/test_phase2.c $(CORE_SRCS)
@@ -120,10 +121,15 @@ $(RV32CSRTESTBIN): tests/test_rv32_csr.c rv32.c
 	@echo "Generating $@"
 	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_csr.c -o $@
 
+$(RV32TRAPTESTBIN): tests/test_rv32_trap.c rv32.c
+	@echo "Generating $@"
+	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_trap.c -o $@
+
 .PHONY: test-rv32
-test-rv32: $(RV32TESTBIN) $(RV32CSRTESTBIN) $(GUEST)
+test-rv32: $(RV32TESTBIN) $(RV32CSRTESTBIN) $(RV32TRAPTESTBIN) $(GUEST)
 	./$(RV32TESTBIN)
 	./$(RV32CSRTESTBIN)
+	./$(RV32TRAPTESTBIN)
 	python3 tests/test_rv32_images.py ./$(GUEST)
 
 RV32_CROSS?=riscv64-unknown-elf-
@@ -175,7 +181,7 @@ clean: clean-obj clean-asm
 	rm -rf *~
 
 clean-pkg: clean clean-dep
-	rm -rf $(PKG) $(GUEST) tern-test $(TESTBIN) $(TESTBIN)-san $(TMLTESTBIN) $(TMLTESTBIN)-san $(PHASE2TESTBIN) $(PHASE2TESTBIN)-san $(RV32TESTBIN) $(RV32CSRTESTBIN) bench-cpu bench-cpu-uncached bench-guest
+	rm -rf $(PKG) $(GUEST) tern-test $(TESTBIN) $(TESTBIN)-san $(TMLTESTBIN) $(TMLTESTBIN)-san $(PHASE2TESTBIN) $(PHASE2TESTBIN)-san $(RV32TESTBIN) $(RV32CSRTESTBIN) $(RV32TRAPTESTBIN) bench-cpu bench-cpu-uncached bench-guest
 
 rebuild: clean-pkg pkg
 

@@ -48,6 +48,7 @@ emu/bench-cpu-uncached
 emu/bench-guest
 emu/test-rv32-mmu
 emu/test-rv32-csr
+emu/test-rv32-trap
 emu/tests/rv32_mmu_guest.elf
 emu/tests/rv32_mmu_guest.bin
 tools/systemd/build/

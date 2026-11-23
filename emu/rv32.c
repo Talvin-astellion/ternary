@@ -70,12 +70,14 @@
 #define SIP_STIP        (1u << 5)
 #define SIP_SEIP        (1u << 9)
 
+#define CAUSE_SOFTWARE  1
 #define CAUSE_ILLEGAL   2
 #define CAUSE_BREAK     3
 #define CAUSE_LOAD      5
 #define CAUSE_STORE     7
 #define CAUSE_ECALL_U   8
 #define CAUSE_ECALL_S   9
+#define CAUSE_EXT_S     9
 #define CAUSE_TIMER     5
 
 #define SBI_EXT_BASE    0x10u
@@ -715,7 +717,7 @@ static void csr_write(uint32_t csr, uint32_t val)
         mstatus = (mstatus & ~SSTATUS_MASK) | sstatus;
         break;
     case 0x104: sie = val & (SIE_SSIE | SIE_STIE | SIE_SEIE); break;
-    case 0x105: stvec = val & ~3u; break;
+    case 0x105: stvec = val & ~2u; break;
     case 0x140: sscratch = val; break;
     case 0x141: sepc = val & ~3u; break;
     case 0x142: break;
@@ -737,7 +739,7 @@ static void csr_write(uint32_t csr, uint32_t val)
         sstatus = mstatus & SSTATUS_MASK;
         break;
     case 0x304: mie = val & (SIE_SSIE | SIE_STIE | SIE_SEIE); break;
-    case 0x305: mtvec = val & ~3u; break;
+    case 0x305: mtvec = val & ~2u; break;
     case 0x340: mscratch = val; break;
     case 0x341: mepc = val & ~3u; break;
     case 0x342: break;
@@ -770,7 +772,7 @@ static void do_trap(uint32_t cause, uint32_t tval, int interrupt, uint32_t epc)
         fatal("trap before stvec was installed");
 }
 
-static int maybe_interrupt(void)
+static int interrupt_pending(void)
 {
     if ((instret & 0x3fu) == 0)
         update_time();
@@ -779,14 +781,34 @@ static int maybe_interrupt(void)
         sip |= SIP_STIP;
         timer_deadline = UINT64_MAX;
     }
-    if ((sip & SIP_STIP) && (sie & SIE_STIE) && (sstatus & MSTATUS_SIE)) {
-        sip &= ~SIP_STIP;
-        if (debug_sbi)
-            fprintf(stderr, "timer irq time=%" PRIu64 " pc=0x%08x\n", guest_time, pc);
-        do_trap(CAUSE_TIMER, 0, 1, pc);
-        return 1;
+    return (sip & sie & (SIP_SSIP | SIP_STIP | SIP_SEIP)) != 0 &&
+           (sstatus & MSTATUS_SIE) != 0;
+}
+
+static int maybe_interrupt(void)
+{
+    uint32_t pending;
+    uint32_t cause;
+
+    if (!interrupt_pending())
+        return 0;
+
+    if ((sip & SIP_SEIP) && (sie & SIE_SEIE)) {
+        pending = SIP_SEIP;
+        cause = CAUSE_EXT_S;
+    } else if ((sip & SIP_STIP) && (sie & SIE_STIE)) {
+        pending = SIP_STIP;
+        cause = CAUSE_TIMER;
+    } else {
+        pending = SIP_SSIP;
+        cause = CAUSE_SOFTWARE;
     }
-    return 0;
+    sip &= ~pending;
+    if (debug_sbi)
+        fprintf(stderr, "irq cause=%u time=%" PRIu64 " pc=0x%08x\n",
+                cause, guest_time, pc);
+    do_trap(cause, 0, 1, pc);
+    return 1;
 }
 
 static void set_reg(uint32_t rd, uint32_t val)
@@ -1314,8 +1336,8 @@ static void execute(uint32_t inst, uint32_t cur_pc)
                 do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
                 break;
             case 0x10500073: /* wfi */
-                if (sleep_wfi && !((sip & (sie & MSTATUS_SIE)) &&
-                                   (sstatus & MSTATUS_SIE))) {
+                update_time();
+                if (sleep_wfi && !interrupt_pending()) {
                     struct timespec ts = { .tv_sec = 0, .tv_nsec = 100000 };
                     nanosleep(&ts, NULL);
                 }
