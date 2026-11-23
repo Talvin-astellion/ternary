@@ -28,8 +28,10 @@
  */
 
 #include <errno.h>
+#include <fenv.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <math.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdint.h>
@@ -131,6 +133,8 @@ enum MemAccess {
 
 static uint8_t *ram;
 static uint32_t regs[32];
+static uint64_t fpr[32];
+static uint32_t fcsr;
 static uint32_t pc;
 static uint32_t sstatus;
 static int priv;
@@ -668,9 +672,33 @@ static void mem_store32(uint32_t addr, uint32_t val)
         mem_store8_raw(addr + 3, (val >> 24) & 0xff);
 }
 
+static uint64_t mem_load64(uint32_t addr)
+{
+    uint64_t lo, hi;
+
+    lo = mem_load32(addr);
+    if (mem_fault || mmu_fault_cause)
+        return 0;
+    hi = mem_load32(addr + 4);
+    if (mem_fault || mmu_fault_cause)
+        return 0;
+    return lo | (hi << 32);
+}
+
+static void mem_store64(uint32_t addr, uint64_t val)
+{
+    mem_store32(addr, (uint32_t)val);
+    if (mem_fault || mmu_fault_cause)
+        return;
+    mem_store32(addr + 4, (uint32_t)(val >> 32));
+}
+
+static void fp_dirty(void);
+
 static int csr_valid(uint32_t csr)
 {
     switch (csr) {
+    case 0x001: case 0x002: case 0x003:
     case 0x100: case 0x104: case 0x105: case 0x106: case 0x140:
     case 0x141: case 0x142: case 0x143: case 0x144: case 0x146:
     case 0x180:
@@ -700,6 +728,7 @@ static int csr_readonly(uint32_t csr)
 static int csr_user_ok(uint32_t csr)
 {
     switch (csr) {
+    case 0x001: case 0x002: case 0x003:
     case 0xc00: case 0xc01: case 0xc02: case 0xc80: case 0xc81: case 0xc82:
         return 1;
     default:
@@ -710,6 +739,9 @@ static int csr_user_ok(uint32_t csr)
 static uint32_t csr_read(uint32_t csr)
 {
     switch (csr) {
+    case 0x001: return fcsr & 0x1fu;
+    case 0x002: return (fcsr >> 5) & 7u;
+    case 0x003: return fcsr & 0xffu;
     case 0x100: return sstatus;
     case 0x104: return sie;
     case 0x105: return stvec;
@@ -720,7 +752,7 @@ static uint32_t csr_read(uint32_t csr)
     case 0x144: return sip;
     case 0x180: return satp;
     case 0x300: return mstatus;
-    case 0x301: return 0x40001101u; /* RV32, IMA */
+    case 0x301: return 0x40001129u; /* RV32, IMACFD */
     case 0x304: return mie;
     case 0x305: return mtvec;
     case 0x340: return mscratch;
@@ -745,6 +777,18 @@ static uint32_t csr_read(uint32_t csr)
 static void csr_write(uint32_t csr, uint32_t val)
 {
     switch (csr) {
+    case 0x001:
+        fcsr = (fcsr & 0xe0u) | (val & 0x1fu);
+        fp_dirty();
+        break;
+    case 0x002:
+        fcsr = (fcsr & 0x1fu) | ((val & 7u) << 5);
+        fp_dirty();
+        break;
+    case 0x003:
+        fcsr = val & 0xffu;
+        fp_dirty();
+        break;
     case 0x100:
         sstatus = val & SSTATUS_MASK;
         mstatus = (mstatus & ~SSTATUS_MASK) | sstatus;
@@ -854,6 +898,12 @@ static void set_reg(uint32_t rd, uint32_t val)
         regs[rd] = val;
 }
 
+static void fp_dirty(void)
+{
+    mstatus = (mstatus & ~MSTATUS_FS) | (3u << 13);
+    sstatus = mstatus & SSTATUS_MASK;
+}
+
 static int32_t imm_i(uint32_t inst)
 {
     return (int32_t)inst >> 20;
@@ -909,6 +959,13 @@ static uint32_t insn_s(uint32_t imm, uint32_t rs2, uint32_t rs1,
            (funct3 << 12) | ((imm & 0x1fu) << 7) | 0x23u;
 }
 
+static uint32_t insn_s_fp(uint32_t imm, uint32_t rs2, uint32_t rs1,
+                          uint32_t funct3)
+{
+    return (((imm >> 5) & 0x7fu) << 25) | (rs2 << 20) | (rs1 << 15) |
+           (funct3 << 12) | ((imm & 0x1fu) << 7) | 0x27u;
+}
+
 static uint32_t insn_b(int32_t imm, uint32_t rs2, uint32_t rs1,
                        uint32_t funct3)
 {
@@ -931,6 +988,68 @@ static uint32_t insn_j(int32_t imm, uint32_t rd)
 static uint32_t insn_u(uint32_t imm, uint32_t rd, uint32_t op)
 {
     return (imm & 0xfffff000u) | (rd << 7) | op;
+}
+
+static float bits_f32(uint32_t bits)
+{
+    float v;
+
+    memcpy(&v, &bits, sizeof(v));
+    return v;
+}
+
+static uint32_t f32_bits(float v)
+{
+    uint32_t bits;
+
+    memcpy(&bits, &v, sizeof(bits));
+    return bits;
+}
+
+static double bits_f64(uint64_t bits)
+{
+    double v;
+
+    memcpy(&v, &bits, sizeof(v));
+    return v;
+}
+
+static uint64_t f64_bits(double v)
+{
+    uint64_t bits;
+
+    memcpy(&bits, &v, sizeof(bits));
+    return bits;
+}
+
+static int fp_begin(uint32_t rm)
+{
+    if (rm == 7)
+        rm = (fcsr >> 5) & 7u;
+    if (rm > 4)
+        return -1;
+    feclearexcept(FE_ALL_EXCEPT);
+    switch (rm) {
+    case 0: case 4: fesetround(FE_TONEAREST); break;
+    case 1: fesetround(FE_TOWARDZERO); break;
+    case 2: fesetround(FE_DOWNWARD); break;
+    case 3: fesetround(FE_UPWARD); break;
+    }
+    return 0;
+}
+
+static void fp_end(void)
+{
+    int e = fetestexcept(FE_INVALID | FE_DIVBYZERO | FE_OVERFLOW |
+                         FE_UNDERFLOW | FE_INEXACT);
+
+    if (e & FE_INVALID) fcsr |= 0x10u;
+    if (e & FE_DIVBYZERO) fcsr |= 0x08u;
+    if (e & FE_OVERFLOW) fcsr |= 0x04u;
+    if (e & FE_UNDERFLOW) fcsr |= 0x02u;
+    if (e & FE_INEXACT) fcsr |= 0x01u;
+    fp_dirty();
+    fesetround(FE_TONEAREST);
 }
 
 static int32_t c_sext(uint32_t val, unsigned bits)
@@ -1022,6 +1141,19 @@ static uint32_t c_swsp_imm(uint16_t c)
            (((uint32_t)c >> 7) & 3u) << 6;
 }
 
+static uint32_t c_fldsp_imm(uint16_t c)
+{
+    return (((uint32_t)c >> 12) & 1u) << 5 |
+           (((uint32_t)c >> 4) & 3u) << 3 |
+           (((uint32_t)c >> 6) & 7u) << 6;
+}
+
+static uint32_t c_fsdsp_imm(uint16_t c)
+{
+    return (((uint32_t)c >> 10) & 7u) << 3 |
+           (((uint32_t)c >> 7) & 7u) << 6;
+}
+
 static int rv32c_expand(uint16_t c, uint32_t *out)
 {
     uint32_t q = c & 3u;
@@ -1045,11 +1177,23 @@ static int rv32c_expand(uint16_t c, uint32_t *out)
                 return 0;
             *out = insn_i(uimm, 2, 0, rdp, 0x13u);
             return 1;
+        case 1:
+            *out = insn_i(c_cl_imm(c), rs1p, 3, rdp, 0x07u);
+            return 1;
         case 2:
             *out = insn_i(c_cl_imm(c), rs1p, 2, rdp, 0x03u);
             return 1;
+        case 3:
+            *out = insn_i(c_cl_imm(c), rs1p, 2, rdp, 0x07u);
+            return 1;
+        case 5:
+            *out = insn_s_fp(c_cl_imm(c), rs2p, rs1p, 3);
+            return 1;
         case 6:
             *out = insn_s(c_cl_imm(c), rs2p, rs1p, 2);
+            return 1;
+        case 7:
+            *out = insn_s_fp(c_cl_imm(c), rs2p, rs1p, 2);
             return 1;
         default:
             return 0;
@@ -1131,10 +1275,16 @@ static int rv32c_expand(uint16_t c, uint32_t *out)
                 return 0;
             *out = insn_i(c_shamt(c), rd, 1, rd, 0x13u);
             return 1;
+        case 1:
+            *out = insn_i(c_fldsp_imm(c), 2, 3, rd, 0x07u);
+            return 1;
         case 2:
             if (!rd)
                 return 0;
             *out = insn_i(c_lwsp_imm(c), 2, 2, rd, 0x03u);
+            return 1;
+        case 3:
+            *out = insn_i(c_lwsp_imm(c), 2, 2, rd, 0x07u);
             return 1;
         case 4:
             if (!((c >> 12) & 1u)) {
@@ -1157,8 +1307,14 @@ static int rv32c_expand(uint16_t c, uint32_t *out)
             }
             *out = insn_r(0, rs2, rd, 0, rd, 0x33u);
             return 1;
+        case 5:
+            *out = insn_s_fp(c_fsdsp_imm(c), rs2, 2, 3);
+            return 1;
         case 6:
             *out = insn_s(c_swsp_imm(c), rs2, 2, 2);
+            return 1;
+        case 7:
+            *out = insn_s_fp(c_swsp_imm(c), rs2, 2, 2);
             return 1;
         default:
             return 0;
@@ -1341,6 +1497,419 @@ static void sbi_call(void)
     regs[11] = ret;
 }
 
+static uint32_t f32_snan(uint32_t bits)
+{
+    return (bits & 0x7fffffffu) > 0x7f800000u && !(bits & 0x00400000u);
+}
+
+static uint64_t f64_snan(uint64_t bits)
+{
+    return (bits & 0x7fffffffffffffffULL) > 0x7ff0000000000000ULL &&
+           !(bits & 0x0008000000000000ULL);
+}
+
+static uint32_t fp_f32_minmax(uint32_t a, uint32_t b, int max)
+{
+    float fa = bits_f32(a);
+    float fb = bits_f32(b);
+    float r;
+
+    if (isnan(fa) || isnan(fb)) {
+        if (f32_snan(a) || f32_snan(b))
+            feraiseexcept(FE_INVALID);
+        if (isnan(fa) && isnan(fb))
+            return 0x7fc00000u;
+        return isnan(fa) ? b : a;
+    }
+    if (fa == 0.0f && fb == 0.0f) {
+        if ((a & 0x80000000u) == (b & 0x80000000u))
+            return a;
+        return max ? (a & 0x80000000u ? b : a) :
+                     (a & 0x80000000u ? a : b);
+    }
+    r = max ? fmaxf(fa, fb) : fminf(fa, fb);
+    if (isnan(r))
+        return 0x7fc00000u;
+    return f32_bits(r);
+}
+
+static uint64_t fp_f64_minmax(uint64_t a, uint64_t b, int max)
+{
+    double fa = bits_f64(a);
+    double fb = bits_f64(b);
+    double r;
+
+    if (isnan(fa) || isnan(fb)) {
+        if (f64_snan(a) || f64_snan(b))
+            feraiseexcept(FE_INVALID);
+        if (isnan(fa) && isnan(fb))
+            return 0x7ff8000000000000ULL;
+        return isnan(fa) ? b : a;
+    }
+    if (fa == 0.0 && fb == 0.0) {
+        if ((a & 0x8000000000000000ULL) == (b & 0x8000000000000000ULL))
+            return a;
+        return max ? (a & 0x8000000000000000ULL ? b : a) :
+                     (a & 0x8000000000000000ULL ? a : b);
+    }
+    r = max ? fmax(fa, fb) : fmin(fa, fb);
+    if (isnan(r))
+        return 0x7ff8000000000000ULL;
+    return f64_bits(r);
+}
+
+static uint32_t fp_fclass32(uint32_t bits)
+{
+    uint32_t exp = bits & 0x7f800000u;
+    uint32_t frac = bits & 0x007fffffu;
+    uint32_t sign = bits >> 31;
+
+    if (exp == 0x7f800000u) {
+        if (frac) return 1u << (frac & 0x00400000u ? 9 : 8);
+        return 1u << (sign ? 0 : 7);
+    }
+    if (!exp) {
+        if (frac) return 1u << (sign ? 2 : 5);
+        return 1u << (sign ? 3 : 4);
+    }
+    return 1u << (sign ? 1 : 6);
+}
+
+static uint32_t fp_fclass64(uint64_t bits)
+{
+    uint64_t exp = bits & 0x7ff0000000000000ULL;
+    uint64_t frac = bits & 0x000fffffffffffffULL;
+    uint32_t sign = bits >> 63;
+
+    if (exp == 0x7ff0000000000000ULL) {
+        if (frac) return 1u << (frac & 0x0008000000000000ULL ? 9 : 8);
+        return 1u << (sign ? 0 : 7);
+    }
+    if (!exp) {
+        if (frac) return 1u << (sign ? 2 : 5);
+        return 1u << (sign ? 3 : 4);
+    }
+    return 1u << (sign ? 1 : 6);
+}
+
+static int32_t fp_f32_to_i32(float v, uint32_t uns, uint32_t *invalid)
+{
+    float r = rintf(v);
+
+    if (isnan(v)) {
+        *invalid = 1;
+        return uns ? (int32_t)UINT32_MAX : INT32_MAX;
+    }
+    if (uns) {
+        if (r < 0.0f || r >= 4294967296.0f) {
+            *invalid = 1;
+            return (int32_t)UINT32_MAX;
+        }
+        return (int32_t)(uint32_t)r;
+    }
+    if (r < -2147483648.0f || r >= 2147483648.0f) {
+        *invalid = 1;
+        return r < 0.0f ? INT32_MIN : INT32_MAX;
+    }
+    return (int32_t)r;
+}
+
+static int32_t fp_f64_to_i32(double v, uint32_t uns, uint32_t *invalid)
+{
+    double r = rint(v);
+
+    if (isnan(v)) {
+        *invalid = 1;
+        return uns ? (int32_t)UINT32_MAX : INT32_MAX;
+    }
+    if (uns) {
+        if (r < 0.0 || r >= 4294967296.0) {
+            *invalid = 1;
+            return (int32_t)UINT32_MAX;
+        }
+        return (int32_t)(uint32_t)r;
+    }
+    if (r < -2147483648.0 || r >= 2147483648.0) {
+        *invalid = 1;
+        return r < 0.0 ? INT32_MIN : INT32_MAX;
+    }
+    return (int32_t)r;
+}
+
+static void execute_fp(uint32_t inst, uint32_t cur_pc)
+{
+    uint32_t opcode = inst & 0x7fu;
+    uint32_t rd = (inst >> 7) & 0x1fu;
+    uint32_t funct3 = (inst >> 12) & 7u;
+    uint32_t rs1 = (inst >> 15) & 0x1fu;
+    uint32_t rs2 = (inst >> 20) & 0x1fu;
+    uint32_t rs3 = (inst >> 27) & 0x1fu;
+    uint32_t funct7 = inst >> 25;
+    uint32_t fmt = (inst >> 25) & 3u;
+    uint32_t addr, r, invalid;
+    float fa, fb;
+    double da, db;
+
+    switch (opcode) {
+    case 0x07:
+        addr = regs[rs1] + (uint32_t)imm_i(inst);
+        mem_fault = 0;
+        mmu_fault_cause = 0;
+        if (funct3 == 2) {
+            r = mem_load32(addr);
+            if (mem_fault || mmu_fault_cause) {
+                do_trap(mmu_fault_cause ? mmu_fault_cause : CAUSE_LOAD,
+                        addr, 0, cur_pc);
+                return;
+            }
+            fpr[rd] = r;
+        } else if (funct3 == 3) {
+            uint64_t v = mem_load64(addr);
+
+            if (mem_fault || mmu_fault_cause) {
+                do_trap(mmu_fault_cause ? mmu_fault_cause : CAUSE_LOAD,
+                        addr, 0, cur_pc);
+                return;
+            }
+            fpr[rd] = v;
+        } else {
+            do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
+            return;
+        }
+        fp_dirty();
+        return;
+    case 0x27:
+        addr = regs[rs1] + (uint32_t)imm_s(inst);
+        mem_fault = 0;
+        mmu_fault_cause = 0;
+        if (funct3 == 2) {
+            mem_store32(addr, (uint32_t)fpr[rs2]);
+        } else if (funct3 == 3) {
+            mem_store64(addr, fpr[rs2]);
+        } else {
+            do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
+            return;
+        }
+        reservation = ~0u;
+        if (mem_fault || mmu_fault_cause)
+            do_trap(mmu_fault_cause ? mmu_fault_cause : CAUSE_STORE,
+                    addr, 0, cur_pc);
+        return;
+    case 0x43:
+    case 0x47:
+    case 0x4b:
+    case 0x4f:
+        if (fmt > 1 || fp_begin(funct3)) {
+            do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
+            return;
+        }
+        if (!fmt) {
+            float a = bits_f32(fpr[rs1]);
+            float b = bits_f32(fpr[rs2]);
+            float c = bits_f32(fpr[rs3]);
+            float v = opcode == 0x43 ? fmaf(a, b, c) :
+                      opcode == 0x47 ? fmaf(a, b, -c) :
+                      opcode == 0x4b ? fmaf(-a, b, c) : fmaf(-a, b, -c);
+
+            if (isnan(v)) v = bits_f32(0x7fc00000u);
+            fpr[rd] = f32_bits(v);
+        } else {
+            double a = bits_f64(fpr[rs1]);
+            double b = bits_f64(fpr[rs2]);
+            double c = bits_f64(fpr[rs3]);
+            double v = opcode == 0x43 ? fma(a, b, c) :
+                       opcode == 0x47 ? fma(a, b, -c) :
+                       opcode == 0x4b ? fma(-a, b, c) : fma(-a, b, -c);
+
+            if (isnan(v)) v = bits_f64(0x7ff8000000000000ULL);
+            fpr[rd] = f64_bits(v);
+        }
+        fp_end();
+        return;
+    case 0x53:
+        break;
+    default:
+        do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
+        return;
+    }
+
+    switch (funct7) {
+    case 0x00:
+    case 0x01:
+    case 0x04:
+    case 0x05:
+    case 0x08:
+    case 0x09:
+    case 0x0c:
+    case 0x0d:
+    case 0x2c:
+    case 0x2d:
+        if (funct7 & 1) {
+            if ((funct7 == 0x2d) && rs2) break;
+        } else if ((funct7 == 0x2c) && rs2) break;
+        if (fp_begin(funct3)) break;
+        if (!(funct7 & 1)) {
+            fa = bits_f32(fpr[rs1]);
+            fb = bits_f32(fpr[rs2]);
+            switch (funct7) {
+            case 0x00: fa += fb; break;
+            case 0x04: fa -= fb; break;
+            case 0x08: fa *= fb; break;
+            case 0x0c: fa /= fb; break;
+            case 0x2c: fa = sqrtf(fa); break;
+            }
+            if (isnan(fa)) fa = bits_f32(0x7fc00000u);
+            fpr[rd] = f32_bits(fa);
+        } else {
+            da = bits_f64(fpr[rs1]);
+            db = bits_f64(fpr[rs2]);
+            switch (funct7) {
+            case 0x01: da += db; break;
+            case 0x05: da -= db; break;
+            case 0x09: da *= db; break;
+            case 0x0d: da /= db; break;
+            case 0x2d: da = sqrt(da); break;
+            }
+            if (isnan(da)) da = bits_f64(0x7ff8000000000000ULL);
+            fpr[rd] = f64_bits(da);
+        }
+        fp_end();
+        return;
+    case 0x10:
+    case 0x11:
+        if (funct3 > 2) break;
+        if (!(funct7 & 1)) {
+            uint32_t a = (uint32_t)fpr[rs1];
+            uint32_t b = (uint32_t)fpr[rs2];
+            uint32_t s = funct3 == 0 ? b : funct3 == 1 ? ~b : a ^ b;
+
+            fpr[rd] = (a & 0x7fffffffu) | (s & 0x80000000u);
+        } else {
+            uint64_t a = fpr[rs1];
+            uint64_t b = fpr[rs2];
+            uint64_t s = funct3 == 0 ? b : funct3 == 1 ? ~b : a ^ b;
+
+            fpr[rd] = (a & 0x7fffffffffffffffULL) |
+                      (s & 0x8000000000000000ULL);
+        }
+        fp_dirty();
+        return;
+    case 0x14:
+    case 0x15:
+        if (funct3 > 1 || fp_begin(0)) break;
+        if (!(funct7 & 1))
+            fpr[rd] = fp_f32_minmax((uint32_t)fpr[rs1],
+                                    (uint32_t)fpr[rs2], funct3);
+        else
+            fpr[rd] = fp_f64_minmax(fpr[rs1], fpr[rs2], funct3);
+        fp_end();
+        return;
+    case 0x20:
+        if (rs2 != 1 || fp_begin(funct3)) break;
+        fa = (float)bits_f64(fpr[rs1]);
+        if (isnan(fa)) fa = bits_f32(0x7fc00000u);
+        fpr[rd] = f32_bits(fa);
+        fp_end();
+        return;
+    case 0x21:
+        if (rs2 != 0 || fp_begin(funct3)) break;
+        da = (double)bits_f32((uint32_t)fpr[rs1]);
+        if (isnan(da)) da = bits_f64(0x7ff8000000000000ULL);
+        fpr[rd] = f64_bits(da);
+        fp_end();
+        return;
+    case 0x50:
+    case 0x51:
+        if (funct3 > 2 || fp_begin(0)) break;
+        if (!(funct7 & 1)) {
+            uint32_t a = (uint32_t)fpr[rs1];
+            uint32_t b = (uint32_t)fpr[rs2];
+
+            fa = bits_f32(a);
+            fb = bits_f32(b);
+            if (funct3 == 2) {
+                if (f32_snan(a) || f32_snan(b)) feraiseexcept(FE_INVALID);
+                r = !isnan(fa) && !isnan(fb) && fa == fb;
+            } else {
+                if (isnan(fa) || isnan(fb)) feraiseexcept(FE_INVALID);
+                r = !isnan(fa) && !isnan(fb) &&
+                    (funct3 == 1 ? fa < fb : fa <= fb);
+            }
+        } else {
+            da = bits_f64(fpr[rs1]);
+            db = bits_f64(fpr[rs2]);
+            if (funct3 == 2) {
+                if (f64_snan(fpr[rs1]) || f64_snan(fpr[rs2]))
+                    feraiseexcept(FE_INVALID);
+                r = !isnan(da) && !isnan(db) && da == db;
+            } else {
+                if (isnan(da) || isnan(db)) feraiseexcept(FE_INVALID);
+                r = !isnan(da) && !isnan(db) &&
+                    (funct3 == 1 ? da < db : da <= db);
+            }
+        }
+        set_reg(rd, r);
+        fp_end();
+        return;
+    case 0x60:
+    case 0x61:
+        if (rs2 > 1 || fp_begin(funct3)) break;
+        invalid = 0;
+        if (!(funct7 & 1))
+            r = (uint32_t)fp_f32_to_i32(bits_f32((uint32_t)fpr[rs1]),
+                                        rs2, &invalid);
+        else
+            r = (uint32_t)fp_f64_to_i32(bits_f64(fpr[rs1]), rs2, &invalid);
+        if (invalid) feraiseexcept(FE_INVALID);
+        set_reg(rd, r);
+        fp_end();
+        return;
+    case 0x68:
+    case 0x69:
+        if (rs2 > 1 || fp_begin(funct3)) break;
+        if (!(funct7 & 1)) {
+            if (rs2 == 0)
+                fa = (float)(int32_t)regs[rs1];
+            else
+                fa = (float)regs[rs1];
+            fpr[rd] = f32_bits(fa);
+        } else {
+            if (rs2 == 0)
+                da = (double)(int32_t)regs[rs1];
+            else
+                da = (double)regs[rs1];
+            fpr[rd] = f64_bits(da);
+        }
+        fp_end();
+        return;
+    case 0x70:
+        if (rs2 || funct3 > 1) break;
+        set_reg(rd, funct3 == 1 ? fp_fclass32((uint32_t)fpr[rs1]) :
+                                  (uint32_t)fpr[rs1]);
+        fp_dirty();
+        return;
+    case 0x71:
+        if (rs2 || funct3 > 1) break;
+        set_reg(rd, funct3 == 1 ? fp_fclass64(fpr[rs1]) :
+                                  (uint32_t)fpr[rs1]);
+        fp_dirty();
+        return;
+    case 0x78:
+        if (rs2 || funct3) break;
+        fpr[rd] = regs[rs1];
+        fp_dirty();
+        return;
+    case 0x79:
+        if (rs2 || funct3) break;
+        fpr[rd] = regs[rs1];
+        fp_dirty();
+        return;
+    default:
+        break;
+    }
+    do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
+}
+
 static void execute(uint32_t inst, uint32_t cur_pc)
 {
     uint32_t opcode = inst & 0x7fu;
@@ -1354,6 +1923,15 @@ static void execute(uint32_t inst, uint32_t cur_pc)
     int take;
 
     switch (opcode) {
+    case 0x07:
+    case 0x27:
+    case 0x43:
+    case 0x47:
+    case 0x4b:
+    case 0x4f:
+    case 0x53:
+        execute_fp(inst, cur_pc);
+        return;
     case 0x37: /* LUI */
         set_reg(rd, imm_u(inst));
         break;

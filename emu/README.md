@@ -19,7 +19,7 @@ the analysis tools are optional Python 3 scripts.
 | `trace.c`, `trace.h` | Instruction / taint / memory JSONL tracing |
 | `taint.c`, `taint.h` | Register and memory taint propagation |
 | `symbolic.c`, `symbolic.h` | Lightweight collection of conditional constraints |
-| `rv32.c` | RV32IMA guest interpreter (`tern-linux`) with Sv32 MMU |
+| `rv32.c` | RV32IMAFDC guest interpreter (`tern-linux`) with Sv32 MMU |
 | `tests/` | Unit tests run by `make test` / `make test-rv32` |
 
 ## Build and test
@@ -242,10 +242,14 @@ alignment; misaligned atomics raise a load-address-misaligned trap, reserved
 `lr.w`/`sc.w` ordering encodings are illegal, and any successful store or AMO
 clears the local reservation.  `fence` and `fence.i` are no-ops in this
 single-core model.  RV32C instructions are decompressed before execution, with
-2-byte fetches and page-boundary handling; compressed floating-point and
-RV64-only encodings are illegal.  CSR access is privilege checked: user mode may
-read `cycle`/`time`/`instret`, while supervisor/machine CSRs, unknown CSRs and
-writes to read-only CSRs raise illegal-instruction traps.  Supervisor interrupts
+2-byte fetches and page-boundary handling; RV64-only encodings are illegal.
+The F/D extensions provide 32 floating-point registers, `fcsr`/`fflags`/`frm`,
+single and double arithmetic, conversions, comparisons, classification, fused
+multiply-add and IEEE rounding/exception flags; compressed FP loads/stores are
+also decoded.  CSR access is privilege checked: user mode may read
+`cycle`/`time`/`instret` and access the FP CSRs, while supervisor/machine CSRs,
+unknown CSRs and writes to read-only CSRs raise illegal-instruction traps.
+Supervisor interrupts
 honor direct/vectored `stvec`, prioritize external, timer, then software sources,
 and wake `wfi` only when an enabled interrupt is pending.  Use `--debug-mmu` to
 log translation failures.

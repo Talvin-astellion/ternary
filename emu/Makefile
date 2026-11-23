@@ -7,7 +7,7 @@ SRCS=$(filter-out rv32.c,$(wildcard *$(SRCEXT)))
 STRIP=strip
 CC=gcc
 CFLAGS=-Wall -Ofast
-LIBS=
+LIBS=-lm
 #PREFIX=/usr/local
 #CONFIGDIR=/etc
 DEPDIR=deps
@@ -33,7 +33,7 @@ linux: $(GUEST)
 
 $(GUEST): rv32.c
 	@echo "Generating $@"
-	$(CC) $(CFLAGS) rv32.c -o $@
+	$(CC) $(CFLAGS) rv32.c -o $@ $(LIBS)
 	$(STRIP) $@
 
 
@@ -76,6 +76,7 @@ RV32TRAPTESTBIN=test-rv32-trap
 RV32TLBTESTBIN=test-rv32-tlb
 RV32AMOTESTBIN=test-rv32-amo
 RV32RVCTESTBIN=test-rv32-rvc
+RV32FPTESTBIN=test-rv32-fpu
 TEST_SRCS=tests/test_core.c $(CORE_SRCS)
 TML_TEST_SRCS=tests/test_tml.c $(CORE_SRCS)
 PHASE2_TEST_SRCS=tests/test_phase2.c $(CORE_SRCS)
@@ -118,36 +119,41 @@ test: $(TESTBIN) $(TMLTESTBIN) $(PHASE2TESTBIN)
 
 $(RV32TESTBIN): tests/test_rv32_mmu.c rv32.c
 	@echo "Generating $@"
-	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_mmu.c -o $@
+	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_mmu.c -o $@ $(LIBS)
 
 $(RV32CSRTESTBIN): tests/test_rv32_csr.c rv32.c
 	@echo "Generating $@"
-	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_csr.c -o $@
+	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_csr.c -o $@ $(LIBS)
 
 $(RV32TRAPTESTBIN): tests/test_rv32_trap.c rv32.c
 	@echo "Generating $@"
-	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_trap.c -o $@
+	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_trap.c -o $@ $(LIBS)
 
 $(RV32TLBTESTBIN): tests/test_rv32_tlb.c rv32.c
 	@echo "Generating $@"
-	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_tlb.c -o $@
+	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_tlb.c -o $@ $(LIBS)
 
 $(RV32AMOTESTBIN): tests/test_rv32_amo.c rv32.c
 	@echo "Generating $@"
-	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_amo.c -o $@
+	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_amo.c -o $@ $(LIBS)
 
 $(RV32RVCTESTBIN): tests/test_rv32_rvc.c rv32.c
 	@echo "Generating $@"
-	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_rvc.c -o $@
+	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_rvc.c -o $@ $(LIBS)
+
+$(RV32FPTESTBIN): tests/test_rv32_fpu.c rv32.c
+	@echo "Generating $@"
+	$(CC) -Wall -O1 -g -Wno-unused-function $(CFLAGS) tests/test_rv32_fpu.c -o $@ $(LIBS)
 
 .PHONY: test-rv32
-test-rv32: $(RV32TESTBIN) $(RV32CSRTESTBIN) $(RV32TRAPTESTBIN) $(RV32TLBTESTBIN) $(RV32AMOTESTBIN) $(RV32RVCTESTBIN) $(GUEST)
+test-rv32: $(RV32TESTBIN) $(RV32CSRTESTBIN) $(RV32TRAPTESTBIN) $(RV32TLBTESTBIN) $(RV32AMOTESTBIN) $(RV32RVCTESTBIN) $(RV32FPTESTBIN) $(GUEST)
 	./$(RV32TESTBIN)
 	./$(RV32CSRTESTBIN)
 	./$(RV32TRAPTESTBIN)
 	./$(RV32TLBTESTBIN)
 	./$(RV32AMOTESTBIN)
 	./$(RV32RVCTESTBIN)
+	./$(RV32FPTESTBIN)
 	python3 tests/test_rv32_images.py ./$(GUEST)
 
 RV32_CROSS?=riscv64-unknown-elf-
@@ -199,7 +205,7 @@ clean: clean-obj clean-asm
 	rm -rf *~
 
 clean-pkg: clean clean-dep
-	rm -rf $(PKG) $(GUEST) tern-test $(TESTBIN) $(TESTBIN)-san $(TMLTESTBIN) $(TMLTESTBIN)-san $(PHASE2TESTBIN) $(PHASE2TESTBIN)-san $(RV32TESTBIN) $(RV32CSRTESTBIN) $(RV32TRAPTESTBIN) $(RV32TLBTESTBIN) $(RV32AMOTESTBIN) $(RV32RVCTESTBIN) bench-cpu bench-cpu-uncached bench-guest
+	rm -rf $(PKG) $(GUEST) tern-test $(TESTBIN) $(TESTBIN)-san $(TMLTESTBIN) $(TMLTESTBIN)-san $(PHASE2TESTBIN) $(PHASE2TESTBIN)-san $(RV32TESTBIN) $(RV32CSRTESTBIN) $(RV32TRAPTESTBIN) $(RV32TLBTESTBIN) $(RV32AMOTESTBIN) $(RV32RVCTESTBIN) $(RV32FPTESTBIN) bench-cpu bench-cpu-uncached bench-guest
 
 rebuild: clean-pkg pkg
 
