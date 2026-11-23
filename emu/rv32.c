@@ -58,8 +58,9 @@
 #define MSTATUS_SUM     (1u << 18)
 #define MSTATUS_MXR     (1u << 19)
 
-#define SSTATUS_MASK    (MSTATUS_SIE | MSTATUS_SPIE | MSTATUS_SPP | \
+#define MSTATUS_MASK    (MSTATUS_SIE | MSTATUS_SPIE | MSTATUS_SPP | \
                          MSTATUS_FS | MSTATUS_XS | MSTATUS_SUM | MSTATUS_MXR)
+#define SSTATUS_MASK    MSTATUS_MASK
 
 #define SIE_SSIE        (1u << 1)
 #define SIE_STIE        (1u << 5)
@@ -632,6 +633,45 @@ static void mem_store32(uint32_t addr, uint32_t val)
         mem_store8_raw(addr + 3, (val >> 24) & 0xff);
 }
 
+static int csr_valid(uint32_t csr)
+{
+    switch (csr) {
+    case 0x100: case 0x104: case 0x105: case 0x106: case 0x140:
+    case 0x141: case 0x142: case 0x143: case 0x144: case 0x146:
+    case 0x180:
+    case 0x300: case 0x301: case 0x304: case 0x305: case 0x306:
+    case 0x310: case 0x340: case 0x341: case 0x342: case 0x343:
+    case 0x344: case 0x346:
+    case 0xc00: case 0xc01: case 0xc02: case 0xc80: case 0xc81: case 0xc82:
+    case 0xf11: case 0xf12: case 0xf13: case 0xf14:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static int csr_readonly(uint32_t csr)
+{
+    switch (csr) {
+    case 0x142: case 0x143: case 0x301: case 0x342: case 0x343:
+    case 0xc00: case 0xc01: case 0xc02: case 0xc80: case 0xc81: case 0xc82:
+    case 0xf11: case 0xf12: case 0xf13: case 0xf14:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static int csr_user_ok(uint32_t csr)
+{
+    switch (csr) {
+    case 0xc00: case 0xc01: case 0xc02: case 0xc80: case 0xc81: case 0xc82:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static uint32_t csr_read(uint32_t csr)
 {
     switch (csr) {
@@ -693,7 +733,7 @@ static void csr_write(uint32_t csr, uint32_t val)
         tlb_flush();
         break;
     case 0x300:
-        mstatus = val;
+        mstatus = val & MSTATUS_MASK;
         sstatus = mstatus & SSTATUS_MASK;
         break;
     case 0x304: mie = val & (SIE_SSIE | SIE_STIE | SIE_SEIE); break;
@@ -1258,6 +1298,10 @@ static void execute(uint32_t inst, uint32_t cur_pc)
                 do_trap(CAUSE_BREAK, 0, 0, cur_pc);
                 break;
             case 0x10200073: /* sret */
+                if (priv != 1) {
+                    do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
+                    break;
+                }
                 pc = sepc;
                 priv = (sstatus & MSTATUS_SPP) ? 1 : 0;
                 sstatus = (sstatus & ~MSTATUS_SIE) |
@@ -1267,11 +1311,7 @@ static void execute(uint32_t inst, uint32_t cur_pc)
                 mstatus = (mstatus & ~SSTATUS_MASK) | sstatus;
                 break;
             case 0x30200073: /* mret */
-                pc = mepc;
-                mstatus = (mstatus & ~MSTATUS_SIE) |
-                          ((mstatus & MSTATUS_SPIE) ? MSTATUS_SIE : 0);
-                mstatus |= MSTATUS_SPIE;
-                sstatus = mstatus & SSTATUS_MASK;
+                do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
                 break;
             case 0x10500073: /* wfi */
                 if (sleep_wfi && !((sip & (sie & MSTATUS_SIE)) &&
@@ -1312,6 +1352,11 @@ static void execute(uint32_t inst, uint32_t cur_pc)
             default:
                 val = old & ~src;
                 write = src != 0;
+                break;
+            }
+            if (!csr_valid(csr) || (write && csr_readonly(csr)) ||
+                (priv == 0 && (!csr_user_ok(csr) || write))) {
+                do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
                 break;
             }
             if (write)
