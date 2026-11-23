@@ -46,6 +46,7 @@ emu/test-phase2-san
 emu/bench-cpu
 emu/bench-cpu-uncached
 emu/bench-guest
+emu/bench-rv32-fpu-bin
 emu/test-rv32-mmu
 emu/test-rv32-csr
 emu/test-rv32-trap

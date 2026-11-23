@@ -32,6 +32,7 @@ make -C emu test-tools      # Python verifier and cross-process log recovery tes
 make -C emu test-rv32       # host-side Sv32 translation tests
 make -C emu test-rv32-guest # bare-metal Sv32 guest test (needs RV32 cross gcc)
 make -C emu bench           # compare cached and uncached instruction decoding
+make -C emu bench-rv32-fpu  # compare RV32 RNE and quadmath RMM FP paths
 ```
 
 `make -C emu all` additionally builds Doxygen documentation and therefore
@@ -68,6 +69,18 @@ one idle core, interleave binaries and compare medians rather than single runs.
 To profile either version directly, use `emu/bench-cpu [N]` or
 `emu/bench-cpu-uncached [N]`.  The latter is compiled with
 `-DTERNARY_DECODE_CACHE=0`, which can also disable caching in a normal build.
+
+The RV32 floating-point benchmark compares round-to-nearest with the
+`libquadmath` RMM path for single- and double-precision add/sub loops:
+
+```sh
+make -C emu bench-rv32-fpu BENCH_FPU_OPS=5000000
+```
+
+Each workload starts from the same register state, runs an even number of
+operations, and checks the final FP register value before reporting elapsed time
+and millions of operations per second.  It is a synthetic timing report, not a
+timing-based test; repeat runs and compare medians on an idle machine.
 
 RAM address decoding uses a 64-byte lookup table for three-trit chunks instead
 of converting a full 32-trit number.  Memory and taint tracking share this

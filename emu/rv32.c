@@ -1262,12 +1262,12 @@ static uint64_t rmm_f64(double rn, __float128 x)
 
 static uint32_t fp_f32_op(float a, float b, float rn, uint32_t funct7)
 {
-    __float128 aq = a;
-    __float128 bq = b;
-    __float128 x;
+    __float128 aq, bq, x;
 
     if (fp_rm != 4)
         return f32_bits(rn);
+    aq = a;
+    bq = b;
     switch (funct7) {
     case 0x00: x = aq + bq; break;
     case 0x04: x = aq - bq; break;
@@ -1281,12 +1281,12 @@ static uint32_t fp_f32_op(float a, float b, float rn, uint32_t funct7)
 
 static uint64_t fp_f64_op(double a, double b, double rn, uint32_t funct7)
 {
-    __float128 aq = a;
-    __float128 bq = b;
-    __float128 x;
+    __float128 aq, bq, x;
 
     if (fp_rm != 4)
         return f64_bits(rn);
+    aq = a;
+    bq = b;
     switch (funct7) {
     case 0x01: x = aq + bq; break;
     case 0x05: x = aq - bq; break;

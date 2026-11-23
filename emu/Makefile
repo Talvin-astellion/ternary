@@ -85,6 +85,8 @@ PHASE2_TEST_SRCS=tests/test_phase2.c $(CORE_SRCS)
 BENCH_SRCS=tests/bench_cpu.c $(CORE_SRCS)
 BENCH_HEADERS=$(wildcard *.h)
 BENCH_CYCLES?=1000000
+BENCH_FPU_OPS?=5000000
+RV32BENCHBIN=bench-rv32-fpu-bin
 
 bench-cpu: $(BENCH_SRCS) $(BENCH_HEADERS)
 	$(CC) $(CFLAGS) $(BENCH_SRCS) -o $@
@@ -101,6 +103,14 @@ bench: bench-cpu bench-cpu-uncached
 	./bench-cpu-uncached $(BENCH_CYCLES)
 	@echo "Decode cache enabled:"
 	./bench-cpu $(BENCH_CYCLES)
+
+$(RV32BENCHBIN): tests/bench_rv32_fpu.c rv32.c
+	@echo "Generating $@"
+	$(CC) $(RV32_CFLAGS) tests/bench_rv32_fpu.c -o $@ $(RV32_LIBS)
+
+.PHONY: bench-rv32-fpu
+bench-rv32-fpu: $(RV32BENCHBIN)
+	./$(RV32BENCHBIN) $(BENCH_FPU_OPS)
 
 $(TESTBIN): $(TEST_SRCS) cpu.h mem.h ternary.h disassem.h tests/test_core.c
 	@echo "Generating $@"
@@ -207,7 +217,7 @@ clean: clean-obj clean-asm
 	rm -rf *~
 
 clean-pkg: clean clean-dep
-	rm -rf $(PKG) $(GUEST) tern-test $(TESTBIN) $(TESTBIN)-san $(TMLTESTBIN) $(TMLTESTBIN)-san $(PHASE2TESTBIN) $(PHASE2TESTBIN)-san $(RV32TESTBIN) $(RV32CSRTESTBIN) $(RV32TRAPTESTBIN) $(RV32TLBTESTBIN) $(RV32AMOTESTBIN) $(RV32RVCTESTBIN) $(RV32FPTESTBIN) bench-cpu bench-cpu-uncached bench-guest
+	rm -rf $(PKG) $(GUEST) tern-test $(TESTBIN) $(TESTBIN)-san $(TMLTESTBIN) $(TMLTESTBIN)-san $(PHASE2TESTBIN) $(PHASE2TESTBIN)-san $(RV32TESTBIN) $(RV32CSRTESTBIN) $(RV32TRAPTESTBIN) $(RV32TLBTESTBIN) $(RV32AMOTESTBIN) $(RV32RVCTESTBIN) $(RV32FPTESTBIN) $(RV32BENCHBIN) bench-cpu bench-cpu-uncached bench-guest
 
 rebuild: clean-pkg pkg
 
