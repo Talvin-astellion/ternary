@@ -1063,7 +1063,7 @@ static uint32_t csr_read(uint32_t csr)
     case 0x144: return sip & mideleg;
     case 0x180: return satp;
     case 0x300: return mstatus;
-    case 0x301: return 0x40001129u; /* RV32, IMACFD */
+    case 0x301: return 0x4000112du; /* RV32, IMACFD */
     case 0x302: return medeleg;
     case 0x303: return mideleg;
     case 0x304: return mie;
@@ -1131,7 +1131,7 @@ static void csr_write(uint32_t csr, uint32_t val)
     case 0x105: stvec = val & ~2u; break;
     case 0x106: scounteren = val & 7u; break;
     case 0x140: sscratch = val; break;
-    case 0x141: sepc = val & ~3u; break;
+    case 0x141: sepc = val & ~1u; break;
     case 0x142: break;
     case 0x143: break;
     case 0x144:
@@ -1159,7 +1159,7 @@ static void csr_write(uint32_t csr, uint32_t val)
     case 0x305: mtvec = val & ~2u; break;
     case 0x306: mcounteren = val & 7u; break;
     case 0x340: mscratch = val; break;
-    case 0x341: mepc = val & ~3u; break;
+    case 0x341: mepc = val & ~1u; break;
     case 0x342: break;
     case 0x343: break;
     case 0x344:

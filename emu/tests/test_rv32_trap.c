@@ -168,6 +168,18 @@ int main(void)
     assert((sstatus & MSTATUS_SIE) != 0);
     assert((sstatus & MSTATUS_SPP) == 0);
 
+    reset_irq();
+    csr_write(0x141, OLD_PC | 2u);
+    assert(csr_read(0x141) == (OLD_PC | 2u));
+    execute(0x10200073u, VEC);
+    assert(pc == (OLD_PC | 2u));
+
+    reset_mret();
+    csr_write(0x341, OLD_PC | 2u);
+    assert(csr_read(0x341) == (OLD_PC | 2u));
+    execute(0x30200073u, VEC);
+    assert(pc == (OLD_PC | 2u));
+
     reset_mret();
     mstatus = MSTATUS_MPIE;
     execute(0x30200073u, OLD_PC + 4u);

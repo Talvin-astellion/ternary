@@ -63,7 +63,7 @@ int main(void)
     inst = csr_op(2, 0x301, 0, 10);
     execute(inst, TEST_PC);
     assert(scause == 0);
-    assert(regs[10] == 0x40001129u);
+    assert(regs[10] == 0x4000112du);
 
     reset_cpu(1);
     inst = csr_op(1, 0x301, 1, 0);
