@@ -984,10 +984,37 @@ static void csr_write(uint32_t csr, uint32_t val)
     }
 }
 
+static void do_m_trap(uint32_t cause, uint32_t tval, int interrupt,
+                      uint32_t epc)
+{
+    uint32_t vec;
+    uint32_t mpp = priv == 0 ? 0 : (uint32_t)priv << 11;
+
+    mstatus = (mstatus & ~(MSTATUS_MIE | MSTATUS_MPIE | MSTATUS_MPP)) |
+              ((mstatus & MSTATUS_MIE) ? MSTATUS_MPIE : 0) | mpp;
+    sstatus = mstatus & SSTATUS_MASK;
+    priv = 3;
+    mepc = epc;
+    mcause = interrupt ? (cause | 0x80000000u) : cause;
+    mtval = tval;
+    vec = mtvec & ~3u;
+    if (interrupt && (mtvec & 1u))
+        vec += 4u * cause;
+    pc = vec;
+    if (vec == 0)
+        fatal("M trap before mtvec was installed");
+}
+
 static void do_trap(uint32_t cause, uint32_t tval, int interrupt, uint32_t epc)
 {
     uint32_t vec;
-    uint32_t spp = (priv == 0) ? 0 : MSTATUS_SPP;
+    uint32_t spp;
+
+    if (priv == 3) {
+        do_m_trap(cause, tval, interrupt, epc);
+        return;
+    }
+    spp = (priv == 0) ? 0 : MSTATUS_SPP;
 
     sstatus = (sstatus & ~(MSTATUS_SIE | MSTATUS_SPIE | MSTATUS_SPP)) |
               ((sstatus & MSTATUS_SIE) ? MSTATUS_SPIE : 0) | spp;
@@ -1011,31 +1038,42 @@ static int interrupt_pending(void)
 
     if (timer_deadline != UINT64_MAX && guest_time >= timer_deadline) {
         sip |= SIP_STIP;
+        mip |= SIP_STIP;
         timer_deadline = UINT64_MAX;
     }
+    if (priv == 3)
+        return (mip & mie & (SIP_SSIP | SIP_STIP | SIP_SEIP)) != 0 &&
+               (mstatus & MSTATUS_MIE) != 0;
     return (sip & sie & (SIP_SSIP | SIP_STIP | SIP_SEIP)) != 0 &&
            (sstatus & MSTATUS_SIE) != 0;
 }
 
 static int maybe_interrupt(void)
 {
+    uint32_t ip;
+    uint32_t ie;
     uint32_t pending;
     uint32_t cause;
 
     if (!interrupt_pending())
         return 0;
 
-    if ((sip & SIP_SEIP) && (sie & SIE_SEIE)) {
+    ip = priv == 3 ? mip : sip;
+    ie = priv == 3 ? mie : sie;
+    if ((ip & SIP_SEIP) && (ie & SIE_SEIE)) {
         pending = SIP_SEIP;
         cause = CAUSE_EXT_S;
-    } else if ((sip & SIP_STIP) && (sie & SIE_STIE)) {
+    } else if ((ip & SIP_STIP) && (ie & SIE_STIE)) {
         pending = SIP_STIP;
         cause = CAUSE_TIMER;
     } else {
         pending = SIP_SSIP;
         cause = CAUSE_SOFTWARE;
     }
-    sip &= ~pending;
+    if (priv == 3)
+        mip &= ~pending;
+    else
+        sip &= ~pending;
     if (debug_sbi)
         fprintf(stderr, "irq cause=%u time=%" PRIu64 " pc=0x%08x\n",
                 cause, guest_time, pc);

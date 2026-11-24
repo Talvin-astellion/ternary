@@ -6,6 +6,7 @@
 
 #define OLD_PC  0x80030000u
 #define VEC     0x80020000u
+#define M_VEC   0x80040000u
 
 static void reset_irq(void)
 {
@@ -19,6 +20,8 @@ static void reset_irq(void)
     mstatus = MSTATUS_SIE;
     sie = 0;
     sip = 0;
+    mie = 0;
+    mip = 0;
     timer_deadline = UINT64_MAX;
     instret = 0;
     guest_time = 0;
@@ -35,6 +38,18 @@ static void reset_mret(void)
     mcause = 0;
     mtvec = VEC;
     mstatus = 0;
+    sstatus = 0;
+}
+
+static void reset_mtrap(void)
+{
+    reset_irq();
+    priv = 3;
+    mtvec = M_VEC;
+    mepc = 0;
+    mcause = 0;
+    mtval = 0;
+    mstatus = MSTATUS_MIE | MSTATUS_MPP;
     sstatus = 0;
 }
 
@@ -158,6 +173,38 @@ int main(void)
     assert((mstatus & MSTATUS_MIE) != 0);
     assert((mstatus & MSTATUS_MPIE) != 0);
     assert((mstatus & MSTATUS_MPP) == 0);
+
+    reset_mtrap();
+    execute(0xffffffffu, OLD_PC);
+    assert(mcause == CAUSE_ILLEGAL);
+    assert(mtval == 0xffffffffu);
+    assert(mepc == OLD_PC);
+    assert(pc == M_VEC);
+    assert(priv == 3);
+    assert((mstatus & MSTATUS_MIE) == 0);
+    assert((mstatus & MSTATUS_MPIE) != 0);
+    assert((mstatus & MSTATUS_MPP) == MSTATUS_MPP);
+
+    execute(0x30200073u, M_VEC);
+    assert(pc == OLD_PC);
+    assert(priv == 3);
+    assert((mstatus & MSTATUS_MIE) != 0);
+    assert((mstatus & MSTATUS_MPIE) != 0);
+    assert((mstatus & MSTATUS_MPP) == 0);
+
+    reset_mtrap();
+    mie = SIE_STIE;
+    mip = SIP_STIP;
+    assert(maybe_interrupt() == 1);
+    assert(mcause == (CAUSE_TIMER | 0x80000000u));
+    assert(mtval == 0);
+    assert(mepc == OLD_PC);
+    assert(pc == M_VEC);
+    assert(priv == 3);
+    assert((mip & SIP_STIP) == 0);
+    assert((mstatus & MSTATUS_MIE) == 0);
+    assert((mstatus & MSTATUS_MPIE) != 0);
+    assert((mstatus & MSTATUS_MPP) == MSTATUS_MPP);
 
     free(ram);
     return 0;
