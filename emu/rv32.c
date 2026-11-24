@@ -116,8 +116,8 @@
 #define FDT_END         9
 
 #define SATP_MODE_SV32  0x80000000u
-#define SATP_ASID_MASK  0x3ff00000u
-#define SATP_ASID_SHIFT 20
+#define SATP_ASID_MASK  0x7fc00000u
+#define SATP_ASID_SHIFT 22
 #define SATP_PPN_MASK   0x003fffffu
 #define PTE_V           0x00000001u
 #define PTE_R           0x00000002u
@@ -407,7 +407,7 @@ static inline int phys_in_ram_n(uint32_t addr, uint32_t size)
 
 static int pmp_locked(unsigned entry)
 {
-    return (pmpcfg[entry >> 2] >> (8u * (entry & 3u))) & 0x08u;
+    return (pmpcfg[entry >> 2] >> (8u * (entry & 3u))) & 0x80u;
 }
 
 static int pmp_check(uint32_t pa, uint32_t size, enum MemAccess access)
@@ -420,7 +420,7 @@ static int pmp_check(uint32_t pa, uint32_t size, enum MemAccess access)
         return 1;
     for (i = 0; i < 16u; i++) {
         uint32_t cfg = (pmpcfg[i >> 2] >> (8u * (i & 3u))) & 0xffu;
-        unsigned mode = (cfg >> 4) & 3u;
+        unsigned mode = (cfg >> 3) & 3u;
         uint64_t base, end;
 
         if (mode == 0)
@@ -1038,7 +1038,7 @@ static void csr_write(uint32_t csr, uint32_t val)
             if (pmp_locked(base + i))
                 continue;
             pmpcfg[csr - 0x3a0u] &= ~(0xffu << (8u * i));
-            pmpcfg[csr - 0x3a0u] |= (val & 0x3fu) << (8u * i);
+            pmpcfg[csr - 0x3a0u] |= (val & 0x9fu) << (8u * i);
             val >>= 8;
         }
         return;
@@ -1080,12 +1080,10 @@ static void csr_write(uint32_t csr, uint32_t val)
     case 0x180: {
         uint32_t old_satp = satp;
 
-        if ((val & 0xc0000000u) == 0)
+        if ((val & SATP_MODE_SV32) == 0)
             satp = 0;
-        else if ((val & 0xc0000000u) == SATP_MODE_SV32)
+        else
             satp = val & (SATP_MODE_SV32 | SATP_ASID_MASK | SATP_PPN_MASK);
-        else if (debug_mmu)
-            fprintf(stderr, "mmu: unsupported satp mode 0x%08x ignored\n", val);
         if ((satp ^ old_satp) & ~SATP_ASID_MASK)
             tlb_flush();
         break;

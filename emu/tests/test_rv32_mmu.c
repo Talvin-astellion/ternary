@@ -133,7 +133,7 @@ int main(void)
     assert(mem_fault == 0);
 
     csr_write(0x180, 0xc0000000u);
-    assert(satp == (SATP_MODE_SV32 | (0x80100u & SATP_PPN_MASK)));
+    assert(satp == 0xc0000000u);
     csr_write(0x180, 0u);
     assert(satp == 0);
     assert(xlate(0x80400123u, ACCESS_LOAD, &pa) && pa == 0x80400123u);
@@ -179,7 +179,7 @@ int main(void)
     memset(pmpcfg, 0, sizeof(pmpcfg));
     memset(pmpaddr, 0, sizeof(pmpaddr));
     csr_write(0x3b0, 0x201001ffu);
-    csr_write(0x3a0, 0x31u);
+    csr_write(0x3a0, (3u << 3) | 1u);
     priv = 0;
     satp = 0;
     assert(pmp_check(0x80400000u, 4, ACCESS_LOAD));
@@ -193,18 +193,43 @@ int main(void)
     priv = 3;
     assert(pmp_check(0x80400000u, 4, ACCESS_STORE));
     priv = 0;
-    csr_write(0x3a0, 0x39u);
-    csr_write(0x3a0, 0x31u);
+    csr_write(0x3a0, 0x80u | (3u << 3) | 1u);
+    csr_write(0x3a0, (3u << 3) | 1u);
     csr_write(0x3b0, 0u);
-    assert((pmpcfg[0] & 0xffu) == 0x39u);
+    assert((pmpcfg[0] & 0xffu) == (0x80u | (3u << 3) | 1u));
     assert(pmpaddr[0] == 0x201001ffu);
 
     memset(pmpcfg, 0, sizeof(pmpcfg));
     memset(pmpaddr, 0, sizeof(pmpaddr));
     csr_write(0x3b0, 0x80400000u >> 2);
-    csr_write(0x3a0, 0x22u);
+    csr_write(0x3a0, (2u << 3) | 2u);
     assert(pmp_check(0x80400000u, 4, ACCESS_STORE));
     assert(!pmp_check(0x80400000u, 4, ACCESS_LOAD));
+
+    memset(pmpcfg, 0, sizeof(pmpcfg));
+    memset(pmpaddr, 0, sizeof(pmpaddr));
+    pmpaddr[0] = 0x80400000u >> 2;
+    csr_write(0x3a0, (2u << 3) | 1u);
+    priv = 0;
+    assert(pmp_check(0x80400000u, 4, ACCESS_LOAD));
+    assert(!pmp_check(0x80400000u, 4, ACCESS_STORE));
+    assert(pmp_check(0x80400004u, 4, ACCESS_STORE));
+
+    memset(pmpcfg, 0, sizeof(pmpcfg));
+    memset(pmpaddr, 0, sizeof(pmpaddr));
+    pmpaddr[0] = 0x80400000u >> 2;
+    pmpaddr[1] = 0x80401000u >> 2;
+    csr_write(0x3a0, ((1u << 3) | 2u) << 8);
+    assert(pmp_check(0x80400000u, 4, ACCESS_STORE));
+    assert(!pmp_check(0x80400ffcu, 4, ACCESS_LOAD));
+
+    memset(pmpcfg, 0, sizeof(pmpcfg));
+    memset(pmpaddr, 0, sizeof(pmpaddr));
+    pmpaddr[0] = 0x201001ffu;
+    csr_write(0x3a0, (3u << 3) | 1u);
+    assert(pmp_check(0x80400fffu, 1, ACCESS_LOAD));
+    assert(!pmp_check(0x80400fffu, 1, ACCESS_STORE));
+    assert(pmp_check(0x80401000u, 1, ACCESS_STORE));
 
     free(ram);
     return 0;

@@ -8,7 +8,7 @@
 #define L2_PA      0x80200000u
 #define VA1        0x80400000u
 #define VA2        0x80401000u
-#define ASID_SHIFT 20
+#define ASID_SHIFT 22
 
 static void put32(uint32_t pa, uint32_t val)
 {
@@ -75,7 +75,7 @@ int main(void)
 
     reset_mmu();
     set_satp(3);
-    assert((satp & 0x3ff00000u) == (3u << ASID_SHIFT));
+    assert((satp & 0x7fc00000u) == (3u << ASID_SHIFT));
 
     reset_mmu();
     map_4k(VA1, VA1);
@@ -123,6 +123,12 @@ int main(void)
     set_satp(0);
     assert(!xlate(VA1, &pa));
     assert(mmu_fault_cause == CAUSE_LOAD_PF);
+
+    reset_mmu();
+    csr_write(0x180, SATP_MODE_SV32 | (0x100u << ASID_SHIFT) |
+               (0x80100u & SATP_PPN_MASK));
+    assert((satp & SATP_MODE_SV32) != 0);
+    assert(((satp & SATP_ASID_MASK) >> ASID_SHIFT) == 0x100u);
 
     free(ram);
     return 0;

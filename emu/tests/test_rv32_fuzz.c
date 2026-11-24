@@ -49,7 +49,7 @@ static int ref_pmp(uint32_t pa, uint32_t size, enum MemAccess access)
         return 1;
     for (i = 0; i < 16u; i++) {
         uint32_t cfg = (pmpcfg[i >> 2] >> (8u * (i & 3u))) & 0xffu;
-        unsigned mode = (cfg >> 4) & 3u;
+        unsigned mode = (cfg >> 3) & 3u;
         uint64_t base, end;
 
         if (mode == 0)
@@ -294,8 +294,8 @@ static int fuzz_sv32(unsigned long iterations, int with_pmp)
                 pmpaddr[entry] = random_pmpaddr();
             entry = rnd() & 15u;
             pmpaddr[entry] = (rnd() & 1u) ? (ROOT_PA >> 2) : (L2_PA >> 2);
-            pmpcfg[entry >> 2] &= ~(0x3fu << (8u * (entry & 3u)));
-            pmpcfg[entry >> 2] |= (rnd() & 0x3fu) << (8u * (entry & 3u));
+            pmpcfg[entry >> 2] &= ~(0x9fu << (8u * (entry & 3u)));
+            pmpcfg[entry >> 2] |= (rnd() & 0x9fu) << (8u * (entry & 3u));
         } else {
             memset(pmpcfg, 0, sizeof(pmpcfg));
             memset(pmpaddr, 0, sizeof(pmpaddr));
