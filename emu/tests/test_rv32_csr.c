@@ -19,6 +19,8 @@ static void reset_cpu(int mode)
     mstatus = 0;
     scounteren = 0;
     mcounteren = 0;
+    medeleg = MEDELEG_MASK;
+    mideleg = MIDELEG_MASK;
     sie = sip = 0;
     mie = mip = 0;
     regs[1] = 0;
@@ -108,6 +110,21 @@ int main(void)
 
     reset_cpu(1);
     expect_illegal(csr_op(1, 0x306, 1, 0));
+
+    reset_cpu(3);
+    regs[1] = 0xffffffffu;
+    inst = csr_op(1, 0x302, 1, 0);
+    execute(inst, TEST_PC);
+    assert(scause == 0);
+    assert(medeleg == MEDELEG_MASK);
+    regs[1] = 0xffffffffu;
+    inst = csr_op(1, 0x303, 1, 0);
+    execute(inst, TEST_PC);
+    assert(scause == 0);
+    assert(mideleg == MIDELEG_MASK);
+
+    reset_cpu(1);
+    expect_illegal(csr_op(1, 0x302, 1, 0));
 
     reset_cpu(0);
     fcsr = 0;

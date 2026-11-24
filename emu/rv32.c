@@ -131,6 +131,10 @@
 #define CAUSE_LOAD_PF   13
 #define CAUSE_STORE_PF  15
 
+#define MEDELEG_MASK    0x0000ffffu
+#define MIDELEG_MASK    ((1u << CAUSE_SOFTWARE) | (1u << CAUSE_TIMER) | \
+                         (1u << CAUSE_EXT_S))
+
 enum MemAccess {
     ACCESS_FETCH,
     ACCESS_LOAD,
@@ -149,6 +153,8 @@ static uint32_t sie;
 static uint32_t sip;
 static uint32_t scounteren;
 static uint32_t mcounteren;
+static uint32_t medeleg = MEDELEG_MASK;
+static uint32_t mideleg = MIDELEG_MASK;
 static uint32_t pmpcfg[4];
 static uint32_t pmpaddr[16];
 static uint32_t stvec;
@@ -800,7 +806,8 @@ static int csr_valid(uint32_t csr)
     case 0x100: case 0x104: case 0x105: case 0x106: case 0x140:
     case 0x141: case 0x142: case 0x143: case 0x144: case 0x146:
     case 0x180:
-    case 0x300: case 0x301: case 0x304: case 0x305: case 0x306:
+    case 0x300: case 0x301: case 0x302: case 0x303: case 0x304:
+    case 0x305: case 0x306:
     case 0x310: case 0x340: case 0x341: case 0x342: case 0x343:
     case 0x344: case 0x346:
     case 0xc00: case 0xc01: case 0xc02: case 0xc80: case 0xc81: case 0xc82:
@@ -881,6 +888,8 @@ static uint32_t csr_read(uint32_t csr)
     case 0x180: return satp;
     case 0x300: return mstatus;
     case 0x301: return 0x40001129u; /* RV32, IMACFD */
+    case 0x302: return medeleg;
+    case 0x303: return mideleg;
     case 0x304: return mie;
     case 0x305: return mtvec;
     case 0x306: return mcounteren;
@@ -969,6 +978,8 @@ static void csr_write(uint32_t csr, uint32_t val)
         mstatus = val & MSTATUS_MASK;
         sstatus = mstatus & SSTATUS_MASK;
         break;
+    case 0x302: medeleg = val & MEDELEG_MASK; break;
+    case 0x303: mideleg = val & MIDELEG_MASK; break;
     case 0x304: mie = val & (SIE_SSIE | SIE_STIE | SIE_SEIE); break;
     case 0x305: mtvec = val & ~2u; break;
     case 0x306: mcounteren = val & 7u; break;
@@ -1009,8 +1020,9 @@ static void do_trap(uint32_t cause, uint32_t tval, int interrupt, uint32_t epc)
 {
     uint32_t vec;
     uint32_t spp;
+    uint32_t deleg = interrupt ? mideleg : medeleg;
 
-    if (priv == 3) {
+    if (priv == 3 || cause >= 32 || !(deleg & (1u << cause))) {
         do_m_trap(cause, tval, interrupt, epc);
         return;
     }
@@ -1031,7 +1043,7 @@ static void do_trap(uint32_t cause, uint32_t tval, int interrupt, uint32_t epc)
         fatal("trap before stvec was installed");
 }
 
-static int interrupt_pending(void)
+static void update_timer_irq(void)
 {
     if ((instret & 0x3fu) == 0)
         update_time();
@@ -1041,44 +1053,68 @@ static int interrupt_pending(void)
         mip |= SIP_STIP;
         timer_deadline = UINT64_MAX;
     }
-    if (priv == 3)
-        return (mip & mie & (SIP_SSIP | SIP_STIP | SIP_SEIP)) != 0 &&
-               (mstatus & MSTATUS_MIE) != 0;
-    return (sip & sie & (SIP_SSIP | SIP_STIP | SIP_SEIP)) != 0 &&
-           (sstatus & MSTATUS_SIE) != 0;
+}
+
+static uint32_t irq_cause(uint32_t ip, uint32_t ie, uint32_t *pending)
+{
+    if ((ip & SIP_SEIP) && (ie & SIE_SEIE)) {
+        *pending = SIP_SEIP;
+        return CAUSE_EXT_S;
+    }
+    if ((ip & SIP_STIP) && (ie & SIE_STIE)) {
+        *pending = SIP_STIP;
+        return CAUSE_TIMER;
+    }
+    if ((ip & SIP_SSIP) && (ie & SIE_SSIE)) {
+        *pending = SIP_SSIP;
+        return CAUSE_SOFTWARE;
+    }
+    return 0;
+}
+
+static int interrupt_pending(void)
+{
+    uint32_t pending;
+
+    update_timer_irq();
+    if ((mstatus & MSTATUS_MIE) != 0 &&
+        irq_cause(mip, mie, &pending) != 0)
+        return 1;
+    if (priv != 3 && (sstatus & MSTATUS_SIE) != 0 &&
+        irq_cause(sip, sie & mideleg, &pending) != 0)
+        return 1;
+    return 0;
 }
 
 static int maybe_interrupt(void)
 {
-    uint32_t ip;
-    uint32_t ie;
     uint32_t pending;
     uint32_t cause;
 
-    if (!interrupt_pending())
-        return 0;
-
-    ip = priv == 3 ? mip : sip;
-    ie = priv == 3 ? mie : sie;
-    if ((ip & SIP_SEIP) && (ie & SIE_SEIE)) {
-        pending = SIP_SEIP;
-        cause = CAUSE_EXT_S;
-    } else if ((ip & SIP_STIP) && (ie & SIE_STIE)) {
-        pending = SIP_STIP;
-        cause = CAUSE_TIMER;
-    } else {
-        pending = SIP_SSIP;
-        cause = CAUSE_SOFTWARE;
+    update_timer_irq();
+    if ((mstatus & MSTATUS_MIE) != 0) {
+        cause = irq_cause(mip, mie, &pending);
+        if (cause) {
+            mip &= ~pending;
+            if (debug_sbi)
+                fprintf(stderr, "irq cause=%u time=%" PRIu64 " pc=0x%08x\n",
+                        cause, guest_time, pc);
+            do_trap(cause, 0, 1, pc);
+            return 1;
+        }
     }
-    if (priv == 3)
-        mip &= ~pending;
-    else
-        sip &= ~pending;
-    if (debug_sbi)
-        fprintf(stderr, "irq cause=%u time=%" PRIu64 " pc=0x%08x\n",
-                cause, guest_time, pc);
-    do_trap(cause, 0, 1, pc);
-    return 1;
+    if (priv != 3 && (sstatus & MSTATUS_SIE) != 0) {
+        cause = irq_cause(sip, sie & mideleg, &pending);
+        if (cause) {
+            sip &= ~pending;
+            if (debug_sbi)
+                fprintf(stderr, "irq cause=%u time=%" PRIu64 " pc=0x%08x\n",
+                        cause, guest_time, pc);
+            do_trap(cause, 0, 1, pc);
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static void set_reg(uint32_t rd, uint32_t val)

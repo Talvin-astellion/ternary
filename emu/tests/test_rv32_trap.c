@@ -22,6 +22,8 @@ static void reset_irq(void)
     sip = 0;
     mie = 0;
     mip = 0;
+    medeleg = MEDELEG_MASK;
+    mideleg = MIDELEG_MASK;
     timer_deadline = UINT64_MAX;
     instret = 0;
     guest_time = 0;
@@ -205,6 +207,29 @@ int main(void)
     assert((mstatus & MSTATUS_MIE) == 0);
     assert((mstatus & MSTATUS_MPIE) != 0);
     assert((mstatus & MSTATUS_MPP) == MSTATUS_MPP);
+
+    reset_irq();
+    mtvec = M_VEC;
+    medeleg = 0;
+    execute(0xffffffffu, OLD_PC);
+    assert(scause == 0);
+    assert(mcause == CAUSE_ILLEGAL);
+    assert(mepc == OLD_PC);
+    assert(pc == M_VEC);
+    assert(priv == 3);
+
+    reset_irq();
+    mtvec = M_VEC;
+    mideleg = 0;
+    mstatus |= MSTATUS_MIE;
+    mie = SIE_STIE;
+    mip = SIP_STIP;
+    assert(maybe_interrupt() == 1);
+    assert(scause == 0);
+    assert(mcause == (CAUSE_TIMER | 0x80000000u));
+    assert(mepc == OLD_PC);
+    assert(pc == M_VEC);
+    assert(priv == 3);
 
     free(ram);
     return 0;
