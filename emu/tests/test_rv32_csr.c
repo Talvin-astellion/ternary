@@ -27,6 +27,7 @@ static void reset_cpu(int mode)
     regs[10] = 0;
     mem_fault = 0;
     mmu_fault_cause = 0;
+    pmp_reset();
 }
 
 static uint32_t csr_op(int funct3, uint32_t csr, unsigned rs1, unsigned rd)

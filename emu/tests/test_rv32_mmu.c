@@ -44,6 +44,7 @@ int main(void)
     satp = 0;
     priv = 1;
     mstatus = 0;
+    pmp_reset();
     assert(xlate(0x80400000u, ACCESS_FETCH, &pa) && pa == 0x80400000u);
     assert(xlate(0x10000000u, ACCESS_LOAD, &pa) && pa == 0x10000000u);
 
@@ -213,7 +214,7 @@ int main(void)
     priv = 0;
     assert(pmp_check(0x80400000u, 4, ACCESS_LOAD));
     assert(!pmp_check(0x80400000u, 4, ACCESS_STORE));
-    assert(pmp_check(0x80400004u, 4, ACCESS_STORE));
+    assert(!pmp_check(0x80400004u, 4, ACCESS_STORE));
 
     memset(pmpcfg, 0, sizeof(pmpcfg));
     memset(pmpaddr, 0, sizeof(pmpaddr));
@@ -229,7 +230,15 @@ int main(void)
     csr_write(0x3a0, (3u << 3) | 1u);
     assert(pmp_check(0x80400fffu, 1, ACCESS_LOAD));
     assert(!pmp_check(0x80400fffu, 1, ACCESS_STORE));
-    assert(pmp_check(0x80401000u, 1, ACCESS_STORE));
+    assert(!pmp_check(0x80401000u, 1, ACCESS_STORE));
+
+    memset(pmpcfg, 0, sizeof(pmpcfg));
+    memset(pmpaddr, 0, sizeof(pmpaddr));
+    priv = 1;
+    satp = 0;
+    assert(!pmp_check(0x80400000u, 4, ACCESS_LOAD));
+    priv = 3;
+    assert(pmp_check(0x80400000u, 4, ACCESS_LOAD));
 
     free(ram);
     return 0;

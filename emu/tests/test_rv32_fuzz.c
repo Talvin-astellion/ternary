@@ -82,7 +82,7 @@ static int ref_pmp(uint32_t pa, uint32_t size, enum MemAccess access)
         if ((uint64_t)pa >= base && (uint64_t)pa + size <= end)
             return (cfg & need) != 0;
     }
-    return 1;
+    return 0;
 }
 
 static uint32_t random_pmpaddr(void)
@@ -297,8 +297,7 @@ static int fuzz_sv32(unsigned long iterations, int with_pmp)
             pmpcfg[entry >> 2] &= ~(0x9fu << (8u * (entry & 3u)));
             pmpcfg[entry >> 2] |= (rnd() & 0x9fu) << (8u * (entry & 3u));
         } else {
-            memset(pmpcfg, 0, sizeof(pmpcfg));
-            memset(pmpaddr, 0, sizeof(pmpaddr));
+            pmp_reset();
         }
         priv = (rnd() & 1u) ? 0 : 1;
         mstatus = 0;

@@ -54,6 +54,7 @@ static void reset_cpu(void)
     sepc = 0;
     mem_fault = 0;
     mmu_fault_cause = 0;
+    pmp_reset();
 }
 
 static void run(uint32_t inst)

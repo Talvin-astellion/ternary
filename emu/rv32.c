@@ -153,6 +153,9 @@
 #define MIDELEG_MASK    ((1u << CAUSE_SOFTWARE) | (1u << CAUSE_TIMER) | \
                          (1u << CAUSE_EXT_S))
 
+#define PMP_GRANT_ALL_CFG  0x1fu
+#define PMP_GRANT_ALL_ADDR 0x7fffffffu
+
 enum MemAccess {
     ACCESS_FETCH,
     ACCESS_LOAD,
@@ -437,6 +440,14 @@ static int pmp_locked(unsigned entry)
     return (pmpcfg[entry >> 2] >> (8u * (entry & 3u))) & 0x80u;
 }
 
+static void pmp_reset(void)
+{
+    memset(pmpcfg, 0, sizeof(pmpcfg));
+    memset(pmpaddr, 0, sizeof(pmpaddr));
+    pmpcfg[0] = PMP_GRANT_ALL_CFG;
+    pmpaddr[0] = PMP_GRANT_ALL_ADDR;
+}
+
 static int pmp_check(uint32_t pa, uint32_t size, enum MemAccess access)
 {
     uint32_t need = access == ACCESS_LOAD ? 0x01u :
@@ -480,7 +491,7 @@ static int pmp_check(uint32_t pa, uint32_t size, enum MemAccess access)
         if ((uint64_t)pa >= base && (uint64_t)pa + size <= end)
             return (cfg & need) != 0;
     }
-    return 1;
+    return 0;
 }
 
 static uint32_t pmp_fault_cause(enum MemAccess access)
@@ -3318,6 +3329,7 @@ int main(int argc, char **argv)
     if (stats_enabled)
         atexit(print_stats);
     guest_time = 0;
+    pmp_reset();
     regs[10] = 0;
     regs[11] = dtb ? dtb_addr : 0;
     priv = 1;

@@ -264,10 +264,12 @@ also decoded.  CSR access is privilege checked: user mode may read
 unknown CSRs and writes to read-only CSRs raise illegal-instruction traps.
 Machine-mode traps use `mtvec`/`mepc`/`mcause`/`mtval`, `mret` restores privilege
 from `MSTATUS.MPP`, `medeleg`/`mideleg` route traps to S-mode, and the PMP CSRs
-restrict physical-memory and fetch permissions.  A minimal CLINT exposes
-`mtime`/`mtimecmp` at `0x0200bff8`/`0x02004000`; both CLINT writes and the SBI
-timer extension program the same timer deadline.  Timer interrupts are
-level-triggered and stay pending until `mtimecmp` is reprogrammed.
+restrict physical-memory and fetch permissions.  PMP is default-deny for S/U;
+boot installs a grant-all NAPOT entry that guests may override.  A minimal
+CLINT exposes `mtime`/`mtimecmp` at `0x0200bff8`/`0x02004000`; both CLINT
+writes and the SBI timer extension program the same timer deadline.  Timer
+interrupts are level-triggered and stay pending until `mtimecmp` is
+reprogrammed.
 Deterministic differential
 fuzzing compares `pmp_check` and Sv32 translation (with and without PMP) against
 independent reference models; `make -C emu test-rv32` runs the fuzz cases.

@@ -48,6 +48,7 @@ static void reset_cpu(void)
     sepc = 0;
     mem_fault = 0;
     mmu_fault_cause = 0;
+    pmp_reset();
     put32(ADDR1, 0x11223344u);
     put32(ADDR2, 0x55667788u);
 }

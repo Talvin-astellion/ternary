@@ -31,6 +31,7 @@ static void reset_irq(void)
     time_inst_mode = 1;
     sleep_wfi = 1;
     debug_sbi = 0;
+    pmp_reset();
 }
 
 static void reset_mret(void)

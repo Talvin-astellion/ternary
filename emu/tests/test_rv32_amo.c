@@ -46,8 +46,7 @@ static void reset_cpu(void)
     reservation = ~0u;
     mem_fault = 0;
     mmu_fault_cause = 0;
-    memset(pmpcfg, 0, sizeof(pmpcfg));
-    memset(pmpaddr, 0, sizeof(pmpaddr));
+    pmp_reset();
     memset(ram + ROOT_PA - RAM_BASE, 0, 4096);
     memset(ram + L2_PA - RAM_BASE, 0, 4096);
     put32(ADDR1, 0x11223344u);

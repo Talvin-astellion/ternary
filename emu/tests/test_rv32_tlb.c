@@ -34,6 +34,7 @@ static void reset_mmu(void)
     mem_fault = 0;
     mmu_fault_cause = 0;
     mmu_walks = tlb_hits = tlb_misses = mmu_faults = 0;
+    pmp_reset();
     tlb_flush();
 }
 
