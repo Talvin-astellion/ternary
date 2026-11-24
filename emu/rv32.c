@@ -683,18 +683,23 @@ static int tlb_lookup(uint32_t va, enum MemAccess access, uint32_t *pa_out)
             denied_pte_addr = e->pte_addr;
             continue;
         }
-        if (!(e->pte & PTE_A) ||
-            (access == ACCESS_STORE && !(e->pte & PTE_D))) {
-            uint32_t updated = e->pte | PTE_A |
-                               (access == ACCESS_STORE ? PTE_D : 0u);
+        {
+            int update = !(e->pte & PTE_A) ||
+                         (access == ACCESS_STORE && !(e->pte & PTE_D));
+            enum MemAccess pte_access = update ? ACCESS_STORE : ACCESS_LOAD;
 
-            if (!pmp_check(e->pte_addr, 4, ACCESS_STORE)) {
+            if (!pmp_check(e->pte_addr, 4, pte_access)) {
                 mmu_fault_cause = pmp_fault_cause(access);
                 return -1;
             }
-            if (phys_in_ram_n(e->pte_addr, 4))
-                phys_store32(e->pte_addr, updated);
-            e->pte = updated;
+            if (update) {
+                uint32_t updated = e->pte | PTE_A |
+                                   (access == ACCESS_STORE ? PTE_D : 0u);
+
+                if (phys_in_ram_n(e->pte_addr, 4))
+                    phys_store32(e->pte_addr, updated);
+                e->pte = updated;
+            }
         }
         *pa_out = e->base | (va & e->offset_mask);
         tlb_hits++;

@@ -126,6 +126,15 @@ int main(void)
     assert(mmu_fault_cause == CAUSE_LOAD_PF);
 
     reset_mmu();
+    map_4k(VA1, VA1);
+    set_satp(0);
+    assert(xlate(VA1, &pa));
+    assert(mmu_walks == 1);
+    pmpaddr[0] = (VA1 >> 2) | 0x3ffu;
+    assert(!xlate(VA1, &pa));
+    assert(mmu_fault_cause == CAUSE_LOAD);
+
+    reset_mmu();
     csr_write(0x180, SATP_MODE_SV32 | (0x100u << ASID_SHIFT) |
                (0x80100u & SATP_PPN_MASK));
     assert((satp & SATP_MODE_SV32) != 0);
