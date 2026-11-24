@@ -76,10 +76,20 @@
 #define SIE_SSIE        (1u << 1)
 #define SIE_STIE        (1u << 5)
 #define SIE_SEIE        (1u << 9)
+#define MIE_MSIE        (1u << 3)
+#define MIE_MTIE        (1u << 7)
+#define MIE_MEIE        (1u << 11)
 
 #define SIP_SSIP        (1u << 1)
 #define SIP_STIP        (1u << 5)
 #define SIP_SEIP        (1u << 9)
+#define MIP_MSIP        (1u << 3)
+#define MIP_MTIP        (1u << 7)
+#define MIP_MEIP        (1u << 11)
+
+#define S_INTERRUPT_MASK (SIP_SSIP | SIP_STIP | SIP_SEIP)
+#define M_INTERRUPT_MASK (MIP_MSIP | MIP_MTIP | MIP_MEIP)
+#define INTERRUPT_MASK   (S_INTERRUPT_MASK | M_INTERRUPT_MASK)
 
 #define CAUSE_SOFTWARE  1
 #define CAUSE_ILLEGAL   2
@@ -90,6 +100,9 @@
 #define CAUSE_ECALL_S   9
 #define CAUSE_EXT_S     9
 #define CAUSE_TIMER     5
+#define CAUSE_M_SOFTWARE 3
+#define CAUSE_M_TIMER    7
+#define CAUSE_M_EXTERNAL 11
 
 #define SBI_EXT_BASE    0x10u
 #define SBI_EXT_TIME    0x54494d45u
@@ -272,7 +285,7 @@ static void update_time(void)
 static void raise_timer_irq(void)
 {
     sip |= SIP_STIP;
-    mip |= SIP_STIP;
+    mip |= SIP_STIP | MIP_MTIP;
 }
 
 static void set_timer_deadline(uint64_t deadline)
@@ -284,7 +297,7 @@ static void set_timer_deadline(uint64_t deadline)
         raise_timer_irq();
     else {
         sip &= ~SIP_STIP;
-        mip &= ~SIP_STIP;
+        mip &= ~(SIP_STIP | MIP_MTIP);
     }
 }
 
@@ -1040,14 +1053,14 @@ static uint32_t csr_read(uint32_t csr)
     case 0x002: return (fcsr >> 5) & 7u;
     case 0x003: return fcsr & 0xffu;
     case 0x100: return sstatus;
-    case 0x104: return sie;
+    case 0x104: return sie & mideleg;
     case 0x105: return stvec;
     case 0x106: return scounteren;
     case 0x140: return sscratch;
     case 0x141: return sepc;
     case 0x142: return scause;
     case 0x143: return stval;
-    case 0x144: return sip;
+    case 0x144: return sip & mideleg;
     case 0x180: return satp;
     case 0x300: return mstatus;
     case 0x301: return 0x40001129u; /* RV32, IMACFD */
@@ -1114,7 +1127,7 @@ static void csr_write(uint32_t csr, uint32_t val)
         sstatus = val & SSTATUS_MASK;
         mstatus = (mstatus & ~SSTATUS_MASK) | sstatus;
         break;
-    case 0x104: sie = val & (SIE_SSIE | SIE_STIE | SIE_SEIE); break;
+    case 0x104: sie = val & S_INTERRUPT_MASK & mideleg; break;
     case 0x105: stvec = val & ~2u; break;
     case 0x106: scounteren = val & 7u; break;
     case 0x140: sscratch = val; break;
@@ -1142,7 +1155,7 @@ static void csr_write(uint32_t csr, uint32_t val)
         break;
     case 0x302: medeleg = val & MEDELEG_MASK; break;
     case 0x303: mideleg = val & MIDELEG_MASK; break;
-    case 0x304: mie = val & (SIE_SSIE | SIE_STIE | SIE_SEIE); break;
+    case 0x304: mie = val & INTERRUPT_MASK; break;
     case 0x305: mtvec = val & ~2u; break;
     case 0x306: mcounteren = val & 7u; break;
     case 0x340: mscratch = val; break;
@@ -1150,7 +1163,7 @@ static void csr_write(uint32_t csr, uint32_t val)
     case 0x342: break;
     case 0x343: break;
     case 0x344:
-        mip = (mip & SIP_STIP) | (val & ~SIP_STIP);
+        mip = (mip & (SIP_STIP | MIP_MTIP)) | (val & INTERRUPT_MASK);
         break;
     default:
         break;
@@ -1218,6 +1231,18 @@ static void update_timer_irq(void)
 
 static uint32_t irq_cause(uint32_t ip, uint32_t ie, uint32_t *pending)
 {
+    if ((ip & MIP_MEIP) && (ie & MIE_MEIE)) {
+        *pending = MIP_MEIP;
+        return CAUSE_M_EXTERNAL;
+    }
+    if ((ip & MIP_MTIP) && (ie & MIE_MTIE)) {
+        *pending = MIP_MTIP;
+        return CAUSE_M_TIMER;
+    }
+    if ((ip & MIP_MSIP) && (ie & MIE_MSIE)) {
+        *pending = MIP_MSIP;
+        return CAUSE_M_SOFTWARE;
+    }
     if ((ip & SIP_SEIP) && (ie & SIE_SEIE)) {
         *pending = SIP_SEIP;
         return CAUSE_EXT_S;
@@ -1239,10 +1264,10 @@ static int interrupt_pending(void)
 
     update_timer_irq();
     if ((mstatus & MSTATUS_MIE) != 0 &&
-        irq_cause(mip, mie, &pending) != 0)
+        irq_cause(mip & ~mideleg, mie, &pending) != 0)
         return 1;
     if (priv != 3 && (sstatus & MSTATUS_SIE) != 0 &&
-        irq_cause(sip, sie & mideleg, &pending) != 0)
+        irq_cause(sip & mideleg, sie & mideleg, &pending) != 0)
         return 1;
     return 0;
 }
@@ -1254,10 +1279,13 @@ static int maybe_interrupt(void)
 
     update_timer_irq();
     if ((mstatus & MSTATUS_MIE) != 0) {
-        cause = irq_cause(mip, mie, &pending);
+        cause = irq_cause(mip & ~mideleg, mie, &pending);
         if (cause) {
-            if (pending != SIP_STIP)
+            if (pending != SIP_STIP && pending != MIP_MTIP) {
                 mip &= ~pending;
+                if (pending & S_INTERRUPT_MASK)
+                    sip &= ~pending;
+            }
             if (debug_sbi)
                 fprintf(stderr, "irq cause=%u time=%" PRIu64 " pc=0x%08x\n",
                         cause, guest_time, pc);
@@ -1266,10 +1294,12 @@ static int maybe_interrupt(void)
         }
     }
     if (priv != 3 && (sstatus & MSTATUS_SIE) != 0) {
-        cause = irq_cause(sip, sie & mideleg, &pending);
+        cause = irq_cause(sip & mideleg, sie & mideleg, &pending);
         if (cause) {
-            if (pending != SIP_STIP)
+            if (pending != SIP_STIP) {
                 sip &= ~pending;
+                mip &= ~pending;
+            }
             if (debug_sbi)
                 fprintf(stderr, "irq cause=%u time=%" PRIu64 " pc=0x%08x\n",
                         cause, guest_time, pc);

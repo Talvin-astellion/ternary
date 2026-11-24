@@ -216,16 +216,45 @@ int main(void)
     reset_mtrap();
     mie = SIE_STIE;
     mip = SIP_STIP;
+    assert(!interrupt_pending());
+    assert(!maybe_interrupt());
+    assert(mcause == 0);
+    assert(pc == OLD_PC);
+    assert(priv == 3);
+
+    reset_mtrap();
+    mideleg = 0;
+    csr_write(0x304, MIE_MTIE);
+    csr_write(0x344, MIP_MTIP);
+    assert(csr_read(0x304) == MIE_MTIE);
+    assert((mip & MIP_MTIP) != 0);
     assert(maybe_interrupt() == 1);
-    assert(mcause == (CAUSE_TIMER | 0x80000000u));
+    assert(mcause == (CAUSE_M_TIMER | 0x80000000u));
     assert(mtval == 0);
     assert(mepc == OLD_PC);
     assert(pc == M_VEC);
     assert(priv == 3);
-    assert((mip & SIP_STIP) != 0);
+    assert((mip & MIP_MTIP) != 0);
     assert((mstatus & MSTATUS_MIE) == 0);
     assert((mstatus & MSTATUS_MPIE) != 0);
     assert((mstatus & MSTATUS_MPP) == MSTATUS_MPP);
+
+    reset_mtrap();
+    mideleg = 0;
+    csr_write(0x304, MIE_MEIE | MIE_MTIE | MIE_MSIE);
+    mip = MIP_MEIP | MIP_MTIP | MIP_MSIP;
+    assert(maybe_interrupt() == 1);
+    assert(mcause == (CAUSE_M_EXTERNAL | 0x80000000u));
+    assert((mip & MIP_MEIP) == 0);
+    assert((mip & (MIP_MTIP | MIP_MSIP)) != 0);
+
+    reset_mtrap();
+    mideleg = 0;
+    csr_write(0x304, MIE_MSIE);
+    mip = MIP_MSIP;
+    assert(maybe_interrupt() == 1);
+    assert(mcause == (CAUSE_M_SOFTWARE | 0x80000000u));
+    assert(mip == 0);
 
     reset_irq();
     mtvec = M_VEC;
