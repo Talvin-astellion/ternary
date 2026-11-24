@@ -29,7 +29,7 @@ make -C emu                 # builds emu/tern-cpu-emu
 make -C emu test            # core, TML and trace/taint/symbolic tests
 make -C emu sanitize        # same tests with ASan and UBSan
 make -C emu test-tools      # Python verifier and cross-process log recovery tests
-make -C emu test-rv32       # host-side Sv32 translation tests
+make -C emu test-rv32       # host-side Sv32 tests and deterministic differential fuzz
 make -C emu test-rv32-guest # bare-metal Sv32 guest test (needs RV32 cross gcc)
 make -C emu bench           # compare cached and uncached instruction decoding
 make -C emu bench-rv32-fpu  # compare RV32 RNE and quadmath RMM FP paths
@@ -266,7 +266,9 @@ Machine-mode traps use `mtvec`/`mepc`/`mcause`/`mtval`, `mret` restores privileg
 from `MSTATUS.MPP`, `medeleg`/`mideleg` route traps to S-mode, and the PMP CSRs
 restrict physical-memory and fetch permissions.  A minimal CLINT exposes
 `mtime`/`mtimecmp` at `0x0200bff8`/`0x02004000`; both CLINT writes and the SBI
-timer extension program the same timer deadline.
+timer extension program the same timer deadline.  Deterministic differential
+fuzzing compares `pmp_check` and Sv32 translation (with and without PMP) against
+independent reference models; `make -C emu test-rv32` runs the fuzz cases.
 Supervisor interrupts
 honor direct/vectored `stvec`, prioritize external, timer, then software sources,
 and wake `wfi` only when an enabled interrupt is pending.  Use `--debug-mmu` to

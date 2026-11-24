@@ -435,14 +435,19 @@ static int pmp_check(uint32_t pa, uint32_t size, enum MemAccess access)
             uint32_t addr = pmpaddr[i];
             unsigned ones = 0;
 
-            while (addr & 1u) {
+            while (ones < 32 && (addr & 1u)) {
                 ones++;
                 addr >>= 1;
             }
-            if (ones == 0 || ones > 29)
+            if (ones == 0)
                 continue;
-            base = (uint64_t)(pmpaddr[i] &
-                   ~((1u << (ones + 1)) - 1u)) << 2;
+            if (ones >= 31) {
+                base = 0;
+            } else {
+                uint32_t lowmask = (1u << (ones + 1)) - 1u;
+
+                base = (uint64_t)(pmpaddr[i] & ~lowmask) << 2;
+            }
             end = base + (1ULL << (ones + 3));
         }
         if ((uint64_t)pa >= base && (uint64_t)pa + size <= end)
