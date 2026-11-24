@@ -784,6 +784,39 @@ fail:
     return 0;
 }
 
+static int amo_translate(uint32_t addr, enum MemAccess access,
+                         uint32_t *pa, uint32_t *cause)
+{
+    mem_fault = 0;
+    mmu_fault_cause = 0;
+    if (!translate_addr(addr, access, pa)) {
+        *cause = mmu_fault_cause ? mmu_fault_cause : pmp_fault_cause(access);
+        return 0;
+    }
+    if (!pmp_check(*pa, 4, access)) {
+        *cause = pmp_fault_cause(access);
+        mem_fault = 0;
+        return 0;
+    }
+    return 1;
+}
+
+static int amo_store_translate(uint32_t addr, uint32_t *pa, uint32_t *cause)
+{
+    uint32_t load_pa = 0;
+    uint32_t load_cause = 0;
+
+    if (!amo_translate(addr, ACCESS_STORE, pa, cause))
+        return 0;
+    if (!amo_translate(addr, ACCESS_LOAD, &load_pa, &load_cause) ||
+        load_pa != *pa) {
+        *cause = load_cause == CAUSE_LOAD_PF ? CAUSE_STORE_PF :
+                 pmp_fault_cause(ACCESS_STORE);
+        return 0;
+    }
+    return 1;
+}
+
 static uint8_t mem_load8_raw(uint32_t addr)
 {
     uint32_t pa;
@@ -1100,6 +1133,7 @@ static void csr_write(uint32_t csr, uint32_t val)
             satp = val & (SATP_MODE_SV32 | SATP_ASID_MASK | SATP_PPN_MASK);
         if ((satp ^ old_satp) & ~SATP_ASID_MASK)
             tlb_flush();
+        reservation = ~0u;
         break;
     }
     case 0x300:
@@ -1129,6 +1163,7 @@ static void do_m_trap(uint32_t cause, uint32_t tval, int interrupt,
     uint32_t vec;
     uint32_t mpp = priv == 0 ? 0 : (uint32_t)priv << 11;
 
+    reservation = ~0u;
     mstatus = (mstatus & ~(MSTATUS_MIE | MSTATUS_MPIE | MSTATUS_MPP)) |
               ((mstatus & MSTATUS_MIE) ? MSTATUS_MPIE : 0) | mpp;
     sstatus = mstatus & SSTATUS_MASK;
@@ -1150,6 +1185,7 @@ static void do_trap(uint32_t cause, uint32_t tval, int interrupt, uint32_t epc)
     uint32_t spp;
     uint32_t deleg = interrupt ? mideleg : medeleg;
 
+    reservation = ~0u;
     if (priv == 3 || cause >= 32 || !(deleg & (1u << cause))) {
         do_m_trap(cause, tval, interrupt, epc);
         return;
@@ -2715,36 +2751,58 @@ static void execute(uint32_t inst, uint32_t cur_pc)
             do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
             return;
         }
-        mem_fault = 0;
-        mmu_fault_cause = 0;
-        old = mem_load32(addr);
-        if (mem_fault || mmu_fault_cause) {
-            do_trap(mmu_fault_cause ? mmu_fault_cause : CAUSE_LOAD,
-                    addr, 0, cur_pc);
-            return;
-        }
         switch (inst >> 27) {
-        case 0x02: /* lr.w */
-            reservation = addr;
-            set_reg(rd, old);
+        case 0x02: { /* lr.w */
+            uint32_t pa, cause;
+
+            if (!amo_translate(addr, ACCESS_LOAD, &pa, &cause)) {
+                do_trap(cause, addr, 0, cur_pc);
+                return;
+            }
+            reservation = pa;
+            set_reg(rd, phys_load32(pa));
             break;
-        case 0x03: /* sc.w */
-            if (reservation == addr) {
+        }
+        case 0x03: { /* sc.w */
+            uint32_t pa, cause;
+
+            if (!amo_translate(addr, ACCESS_STORE, &pa, &cause)) {
+                do_trap(cause, addr, 0, cur_pc);
+                return;
+            }
+            if (reservation == pa) {
                 mem_fault = 0;
                 mmu_fault_cause = 0;
                 mem_store32(addr, regs[rs2]);
-                if (mem_fault || mmu_fault_cause)
+                if (mem_fault || mmu_fault_cause) {
                     do_trap(mmu_fault_cause ? mmu_fault_cause : CAUSE_STORE,
                             addr, 0, cur_pc);
-                else
-                    set_reg(rd, 0);
+                    return;
+                }
+                set_reg(rd, 0);
             } else {
                 set_reg(rd, 1);
             }
             reservation = ~0u;
             break;
+        }
         default: {
-            uint32_t src = regs[rs2];
+            uint32_t pa, cause, src = regs[rs2];
+
+            switch (inst >> 27) {
+            case 0x00: case 0x01: case 0x04: case 0x08: case 0x0c:
+            case 0x10: case 0x14: case 0x18: case 0x1c:
+                break;
+            default:
+                do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
+                return;
+            }
+            if (!amo_store_translate(addr, &pa, &cause)) {
+                do_trap(cause, addr, 0, cur_pc);
+                return;
+            }
+            old = phys_load32(pa);
+            val = 0;
             switch (inst >> 27) {
             case 0x00: val = old + src; break;
             case 0x04: val = old ^ src; break;
@@ -2755,20 +2813,17 @@ static void execute(uint32_t inst, uint32_t cur_pc)
             case 0x18: val = old < src ? old : src; break;
             case 0x1c: val = old > src ? old : src; break;
             case 0x01: val = src; break;
-            default:
-                do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
-                return;
             }
             mem_fault = 0;
             mmu_fault_cause = 0;
             mem_store32(addr, val);
-            if (mem_fault || mmu_fault_cause)
+            if (mem_fault || mmu_fault_cause) {
                 do_trap(mmu_fault_cause ? mmu_fault_cause : CAUSE_STORE,
                         addr, 0, cur_pc);
-            else {
-                reservation = ~0u;
-                set_reg(rd, old);
+                return;
             }
+            reservation = ~0u;
+            set_reg(rd, old);
             break;
         }
         }
@@ -2829,6 +2884,7 @@ static void execute(uint32_t inst, uint32_t cur_pc)
                     }
                     tlb_invalidate(rs1 ? regs[rs1] : 0, rs1 != 0,
                                    rs2 ? regs[rs2] : 0, rs2 != 0);
+                    reservation = ~0u;
                     break;
                 }
                 do_trap(CAUSE_ILLEGAL, inst, 0, cur_pc);
