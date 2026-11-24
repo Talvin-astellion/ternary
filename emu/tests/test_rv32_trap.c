@@ -55,6 +55,20 @@ static void reset_mtrap(void)
     sstatus = 0;
 }
 
+static void reset_timer(void)
+{
+    reset_irq();
+    satp = 0;
+    time_inst_mode = 1;
+    instret = 100;
+    guest_time = 100;
+    timer_deadline = UINT64_MAX;
+    mtimecmp = UINT64_MAX;
+    sip = 0;
+    mip = 0;
+    mem_fault = 0;
+}
+
 static void expect_irq(uint32_t cause, uint32_t vec)
 {
     assert(maybe_interrupt() == 1);
@@ -230,6 +244,31 @@ int main(void)
     assert(mepc == OLD_PC);
     assert(pc == M_VEC);
     assert(priv == 3);
+
+    reset_timer();
+    sie = SIE_STIE;
+    mem_store32(CLINT_MTIMECMP, 0x100u);
+    mem_store32(CLINT_MTIMECMP + 4u, 0);
+    assert(!mem_fault);
+    assert(mtimecmp == 0x100u);
+    assert(timer_deadline == 0x100u);
+    assert(mem_load32(CLINT_MTIME) == 100u);
+    assert(mem_load32(CLINT_MTIME + 4u) == 0);
+    assert(!mem_fault);
+    instret = 0x100u;
+    assert(maybe_interrupt() == 1);
+    assert(scause == (CAUSE_TIMER | 0x80000000u));
+    assert(sepc == OLD_PC);
+    assert(pc == VEC);
+
+    reset_timer();
+    regs[17] = SBI_EXT_TIME;
+    regs[16] = 0;
+    regs[10] = 0x200u;
+    regs[11] = 0;
+    sbi_call();
+    assert(timer_deadline == 0x200u);
+    assert(mtimecmp == 0x200u);
 
     free(ram);
     return 0;

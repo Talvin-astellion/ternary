@@ -50,6 +50,10 @@
 
 #define UART_ADDR       0x10000000u
 #define UART_SIZE       0x100u
+#define CLINT_ADDR      0x02000000u
+#define CLINT_SIZE      0x00010000u
+#define CLINT_MTIMECMP  0x02004000u
+#define CLINT_MTIME     0x0200bff8u
 #define TEST_ADDR       0x00100000u
 #define TEST_SIZE       0x1000u
 
@@ -175,6 +179,7 @@ static uint32_t mscratch;
 static uint64_t instret;
 static uint64_t cycle;
 static uint64_t timer_deadline = UINT64_MAX;
+static uint64_t mtimecmp = UINT64_MAX;
 static uint64_t boot_ns;
 static uint64_t guest_time;
 static uint64_t max_insn;
@@ -263,6 +268,25 @@ static void update_time(void)
     guest_time = (ns - boot_ns) * timebase / 1000000000ull;
 }
 
+static void raise_timer_irq(void)
+{
+    sip |= SIP_STIP;
+    mip |= SIP_STIP;
+}
+
+static void set_timer_deadline(uint64_t deadline)
+{
+    update_time();
+    timer_deadline = deadline;
+    mtimecmp = deadline;
+    if (deadline != UINT64_MAX && guest_time >= deadline)
+        raise_timer_irq();
+    else {
+        sip &= ~SIP_STIP;
+        mip &= ~SIP_STIP;
+    }
+}
+
 static void print_stats(void)
 {
     struct timespec ts;
@@ -289,6 +313,81 @@ static inline int in_ram(uint32_t addr)
 static inline int in_uart(uint32_t addr)
 {
     return addr >= UART_ADDR && addr < UART_ADDR + UART_SIZE;
+}
+
+static inline int in_clint(uint32_t addr)
+{
+    return addr >= CLINT_ADDR && addr < CLINT_ADDR + CLINT_SIZE;
+}
+
+static int clint_load8(uint32_t addr, uint8_t *val)
+{
+    uint64_t v;
+    unsigned shift;
+
+    if (!in_clint(addr))
+        return 0;
+    if (addr >= CLINT_MTIME && addr < CLINT_MTIME + 8u) {
+        update_time();
+        v = guest_time;
+        shift = 8u * (addr - CLINT_MTIME);
+    } else if (addr >= CLINT_MTIMECMP && addr < CLINT_MTIMECMP + 8u) {
+        v = mtimecmp;
+        shift = 8u * (addr - CLINT_MTIMECMP);
+    } else {
+        *val = 0;
+        return 1;
+    }
+    *val = (uint8_t)(v >> shift);
+    return 1;
+}
+
+static int clint_load32(uint32_t addr, uint32_t *val)
+{
+    uint64_t v;
+
+    if (!in_clint(addr))
+        return 0;
+    if (addr == CLINT_MTIME || addr == CLINT_MTIME + 4u) {
+        update_time();
+        v = addr == CLINT_MTIME ? guest_time : guest_time >> 32;
+    } else if (addr == CLINT_MTIMECMP) {
+        v = mtimecmp;
+    } else if (addr == CLINT_MTIMECMP + 4u) {
+        v = mtimecmp >> 32;
+    } else {
+        *val = 0;
+        return 1;
+    }
+    *val = (uint32_t)v;
+    return 1;
+}
+
+static int clint_store8(uint32_t addr, uint8_t val)
+{
+    uint64_t v;
+    unsigned shift;
+
+    if (!in_clint(addr))
+        return 0;
+    if (addr >= CLINT_MTIMECMP && addr < CLINT_MTIMECMP + 8u) {
+        shift = 8u * (addr - CLINT_MTIMECMP);
+        v = (mtimecmp & ~(0xffull << shift)) | ((uint64_t)val << shift);
+        set_timer_deadline(v);
+    }
+    return 1;
+}
+
+static int clint_store32(uint32_t addr, uint32_t val)
+{
+    if (!in_clint(addr))
+        return 0;
+    if (addr == CLINT_MTIMECMP) {
+        set_timer_deadline((mtimecmp & 0xffffffff00000000ull) | val);
+    } else if (addr == CLINT_MTIMECMP + 4u) {
+        set_timer_deadline((mtimecmp & 0xffffffffull) | ((uint64_t)val << 32));
+    }
+    return 1;
 }
 
 static inline int in_test(uint32_t addr)
@@ -360,8 +459,12 @@ static uint32_t pmp_fault_cause(enum MemAccess access)
 
 static uint8_t phys_load8(uint32_t addr)
 {
+    uint8_t val;
+
     if (phys_in_ram(addr))
         return ram[addr - RAM_BASE];
+    if (clint_load8(addr, &val))
+        return val;
     if (in_uart(addr) || in_test(addr))
         return 0;
     mem_fault = 1;
@@ -370,6 +473,10 @@ static uint8_t phys_load8(uint32_t addr)
 
 static uint32_t phys_load32(uint32_t addr)
 {
+    uint32_t val;
+
+    if (clint_load32(addr, &val))
+        return val;
     if (!(addr & 3u) && phys_in_ram_n(addr, 4))
         return (uint32_t)ram[addr - RAM_BASE] |
                ((uint32_t)ram[addr - RAM_BASE + 1] << 8) |
@@ -401,6 +508,8 @@ static void phys_store8(uint32_t addr, uint8_t val)
         ram[addr - RAM_BASE] = val;
         return;
     }
+    if (clint_store8(addr, val))
+        return;
     if (in_uart(addr))
         return;
     if (in_test(addr)) {
@@ -412,6 +521,8 @@ static void phys_store8(uint32_t addr, uint8_t val)
 
 static void phys_store32(uint32_t addr, uint32_t val)
 {
+    if (clint_store32(addr, val))
+        return;
     if (!(addr & 3u) && phys_in_ram_n(addr, 4)) {
         ram[addr - RAM_BASE] = val & 0xff;
         ram[addr - RAM_BASE + 1] = (val >> 8) & 0xff;
@@ -1049,8 +1160,7 @@ static void update_timer_irq(void)
         update_time();
 
     if (timer_deadline != UINT64_MAX && guest_time >= timer_deadline) {
-        sip |= SIP_STIP;
-        mip |= SIP_STIP;
+        raise_timer_irq();
         timer_deadline = UINT64_MAX;
     }
 }
@@ -1096,6 +1206,10 @@ static int maybe_interrupt(void)
         cause = irq_cause(mip, mie, &pending);
         if (cause) {
             mip &= ~pending;
+            if (pending == SIP_STIP) {
+                sip &= ~SIP_STIP;
+                mip &= ~SIP_STIP;
+            }
             if (debug_sbi)
                 fprintf(stderr, "irq cause=%u time=%" PRIu64 " pc=0x%08x\n",
                         cause, guest_time, pc);
@@ -1107,6 +1221,10 @@ static int maybe_interrupt(void)
         cause = irq_cause(sip, sie & mideleg, &pending);
         if (cause) {
             sip &= ~pending;
+            if (pending == SIP_STIP) {
+                sip &= ~SIP_STIP;
+                mip &= ~SIP_STIP;
+            }
             if (debug_sbi)
                 fprintf(stderr, "irq cause=%u time=%" PRIu64 " pc=0x%08x\n",
                         cause, guest_time, pc);
@@ -1770,7 +1888,7 @@ static void sbi_call(void)
         break;
     case SBI_EXT_TIME:
         if (fid == 0) {
-            timer_deadline = ((uint64_t)a1 << 32) | a0;
+            set_timer_deadline(((uint64_t)a1 << 32) | a0);
         } else {
             err = SBI_ERR_NOT_SUPPORTED;
         }

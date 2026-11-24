@@ -262,6 +262,11 @@ multiply-add and IEEE rounding/exception flags; compressed FP loads/stores are
 also decoded.  CSR access is privilege checked: user mode may read
 `cycle`/`time`/`instret` and access the FP CSRs, while supervisor/machine CSRs,
 unknown CSRs and writes to read-only CSRs raise illegal-instruction traps.
+Machine-mode traps use `mtvec`/`mepc`/`mcause`/`mtval`, `mret` restores privilege
+from `MSTATUS.MPP`, `medeleg`/`mideleg` route traps to S-mode, and the PMP CSRs
+restrict physical-memory and fetch permissions.  A minimal CLINT exposes
+`mtime`/`mtimecmp` at `0x0200bff8`/`0x02004000`; both CLINT writes and the SBI
+timer extension program the same timer deadline.
 Supervisor interrupts
 honor direct/vectored `stvec`, prioritize external, timer, then software sources,
 and wake `wfi` only when an enabled interrupt is pending.  Use `--debug-mmu` to
