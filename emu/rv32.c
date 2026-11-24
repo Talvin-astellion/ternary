@@ -103,6 +103,7 @@
 #define SBI_ERR_FAILED  (-1)
 #define SBI_ERR_NOT_SUPPORTED (-2)
 #define SBI_ERR_INVALID_PARAM (-3)
+#define SBI_ERR_INVALID_ADDRESS (-5)
 
 #define SBI_SPEC_VERSION 0x02000000u
 #define SBI_IMPL_ID      0
@@ -403,6 +404,19 @@ static inline int phys_in_ram(uint32_t addr)
 static inline int phys_in_ram_n(uint32_t addr, uint32_t size)
 {
     return addr >= RAM_BASE && (uint64_t)addr + size <= (uint64_t)RAM_BASE + RAM_SIZE;
+}
+
+static int phys_range_valid(uint32_t addr, uint32_t size)
+{
+    if (size == 0 || phys_in_ram_n(addr, size))
+        return 1;
+    if (in_uart(addr) && size <= UART_ADDR + UART_SIZE - addr)
+        return 1;
+    if (in_clint(addr) && size <= CLINT_ADDR + CLINT_SIZE - addr)
+        return 1;
+    if (in_test(addr) && size <= TEST_ADDR + TEST_SIZE - addr)
+        return 1;
+    return 0;
 }
 
 static int pmp_locked(unsigned entry)
@@ -1162,10 +1176,8 @@ static void update_timer_irq(void)
     if ((instret & 0x3fu) == 0)
         update_time();
 
-    if (timer_deadline != UINT64_MAX && guest_time >= timer_deadline) {
+    if (timer_deadline != UINT64_MAX && guest_time >= timer_deadline)
         raise_timer_irq();
-        timer_deadline = UINT64_MAX;
-    }
 }
 
 static uint32_t irq_cause(uint32_t ip, uint32_t ie, uint32_t *pending)
@@ -1208,11 +1220,8 @@ static int maybe_interrupt(void)
     if ((mstatus & MSTATUS_MIE) != 0) {
         cause = irq_cause(mip, mie, &pending);
         if (cause) {
-            mip &= ~pending;
-            if (pending == SIP_STIP) {
-                sip &= ~SIP_STIP;
-                mip &= ~SIP_STIP;
-            }
+            if (pending != SIP_STIP)
+                mip &= ~pending;
             if (debug_sbi)
                 fprintf(stderr, "irq cause=%u time=%" PRIu64 " pc=0x%08x\n",
                         cause, guest_time, pc);
@@ -1223,11 +1232,8 @@ static int maybe_interrupt(void)
     if (priv != 3 && (sstatus & MSTATUS_SIE) != 0) {
         cause = irq_cause(sip, sie & mideleg, &pending);
         if (cause) {
-            sip &= ~pending;
-            if (pending == SIP_STIP) {
-                sip &= ~SIP_STIP;
-                mip &= ~SIP_STIP;
-            }
+            if (pending != SIP_STIP)
+                sip &= ~pending;
             if (debug_sbi)
                 fprintf(stderr, "irq cause=%u time=%" PRIu64 " pc=0x%08x\n",
                         cause, guest_time, pc);
@@ -1918,38 +1924,56 @@ static void sbi_call(void)
         }
         break;
     case SBI_EXT_SRST:
-        if (fid == 0)
-            sbi_shutdown(a0, a1);
-        else
+        if (fid != 0) {
             err = SBI_ERR_NOT_SUPPORTED;
+        } else if (a0 > 2u || a1 > 1u) {
+            err = SBI_ERR_INVALID_PARAM;
+        } else if (a0 == 0) {
+            sbi_shutdown(0, 0);
+        } else {
+            err = SBI_ERR_NOT_SUPPORTED;
+        }
         break;
     case SBI_EXT_DBCN: {
         uint64_t addr = ((uint64_t)a2 << 32) | a1;
-        uint32_t i;
         uint8_t buf[256];
+        uint32_t len = a0 > sizeof(buf) ? (uint32_t)sizeof(buf) : a0;
+        uint32_t i;
 
+        if (fid <= 1 && (a2 != 0u ||
+                         addr + len > UINT64_C(0x100000000) ||
+                         !phys_range_valid((uint32_t)addr, len))) {
+            err = SBI_ERR_INVALID_ADDRESS;
+            break;
+        }
         switch (fid) {
         case 0:
-            if (a0 > sizeof(buf))
-                a0 = sizeof(buf);
-            for (i = 0; i < a0; i++) {
+            for (i = 0; i < len; i++) {
                 mem_fault = 0;
                 buf[i] = phys_load8((uint32_t)(addr + i));
-                if (mem_fault)
+                if (mem_fault) {
+                    err = SBI_ERR_INVALID_ADDRESS;
+                    mem_fault = 0;
                     break;
+                }
             }
             console_write(buf, i);
             ret = i;
             break;
         case 1: {
-            ssize_t n;
-            if (a0 > sizeof(buf))
-                a0 = sizeof(buf);
-            n = console_try_read(buf, a0);
+            ssize_t n = console_try_read(buf, len);
+
             if (n > 0) {
-                for (i = 0; i < (uint32_t)n; i++)
+                for (i = 0; i < (uint32_t)n; i++) {
+                    mem_fault = 0;
                     phys_store8((uint32_t)(addr + i), buf[i]);
-                ret = (uint32_t)n;
+                    if (mem_fault) {
+                        err = SBI_ERR_INVALID_ADDRESS;
+                        mem_fault = 0;
+                        break;
+                    }
+                }
+                ret = i;
             }
             break;
         }
@@ -1965,7 +1989,7 @@ static void sbi_call(void)
     default:
         switch (eid) {
         case 0:
-            timer_deadline = a0;
+            set_timer_deadline(((uint64_t)a1 << 32) | a0);
             break;
         case 1:
             console_putc((uint8_t)a0);
@@ -1973,7 +1997,8 @@ static void sbi_call(void)
         case 2: {
             uint8_t c;
             ssize_t n = console_try_read(&c, 1);
-            ret = n > 0 ? c : (uint32_t)-1;
+
+            err = n > 0 ? (int32_t)c : -1;
             break;
         }
         case 3:

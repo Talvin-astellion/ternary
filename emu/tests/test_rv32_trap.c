@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <sys/wait.h>
 
 #define main rv32_unused_main
 #include "../rv32.c"
@@ -91,7 +92,7 @@ int main(void)
     sie = SIE_STIE;
     sip = SIP_STIP;
     expect_irq(5, VEC);
-    assert((sip & SIP_STIP) == 0);
+    assert((sip & SIP_STIP) != 0);
 
     reset_irq();
     csr_write(0x105, VEC | 1u);
@@ -151,7 +152,11 @@ int main(void)
     timer_deadline = 1;
     assert(interrupt_pending());
     assert((sip & SIP_STIP) != 0);
-    assert(timer_deadline == UINT64_MAX);
+    assert(timer_deadline == 1u);
+    update_time();
+    update_timer_irq();
+    assert((sip & SIP_STIP) != 0);
+    assert(timer_deadline == 1u);
 
     reset_irq();
     stvec = VEC;
@@ -217,7 +222,7 @@ int main(void)
     assert(mepc == OLD_PC);
     assert(pc == M_VEC);
     assert(priv == 3);
-    assert((mip & SIP_STIP) == 0);
+    assert((mip & SIP_STIP) != 0);
     assert((mstatus & MSTATUS_MIE) == 0);
     assert((mstatus & MSTATUS_MPIE) != 0);
     assert((mstatus & MSTATUS_MPP) == MSTATUS_MPP);
@@ -269,6 +274,99 @@ int main(void)
     sbi_call();
     assert(timer_deadline == 0x200u);
     assert(mtimecmp == 0x200u);
+
+    reset_irq();
+    {
+        int p[2];
+        int saved = dup(STDIN_FILENO);
+
+        assert(saved >= 0);
+        assert(pipe(p) == 0);
+        assert(write(p[1], "A", 1) == 1);
+        close(p[1]);
+        assert(dup2(p[0], STDIN_FILENO) == STDIN_FILENO);
+        regs[17] = 2;
+        regs[16] = 0;
+        regs[10] = 0xdeadbeefu;
+        regs[11] = 0xfeedfaceu;
+        sbi_call();
+        assert((int32_t)regs[10] == 'A');
+        assert(regs[11] == 0);
+        regs[10] = 0xdeadbeefu;
+        regs[11] = 0xfeedfaceu;
+        sbi_call();
+        assert((int32_t)regs[10] == -1);
+        assert(regs[11] == 0);
+        assert(dup2(saved, STDIN_FILENO) == STDIN_FILENO);
+        close(p[0]);
+        close(saved);
+    }
+
+    reset_timer();
+    regs[17] = 0;
+    regs[16] = 0;
+    regs[10] = 0x300u;
+    regs[11] = 1u;
+    sbi_call();
+    assert(timer_deadline == 0x100000300ull);
+    assert(mtimecmp == 0x100000300ull);
+    assert(regs[10] == 0);
+
+    reset_irq();
+    mem_fault = 0;
+    regs[17] = SBI_EXT_DBCN;
+    regs[16] = 0;
+    regs[10] = 1;
+    regs[11] = 0x00110000u;
+    regs[12] = 0;
+    sbi_call();
+    assert((int32_t)regs[10] == -5);
+    assert(regs[11] == 0);
+    assert(!mem_fault);
+
+    reset_irq();
+    regs[17] = SBI_EXT_DBCN;
+    regs[16] = 1;
+    regs[10] = 1;
+    regs[11] = 0x00110000u;
+    regs[12] = 0;
+    sbi_call();
+    assert((int32_t)regs[10] == -5);
+    assert(regs[11] == 0);
+
+    {
+        pid_t pid = fork();
+        int status;
+
+        assert(pid >= 0);
+        if (pid == 0) {
+            reset_irq();
+            regs[17] = SBI_EXT_SRST;
+            regs[16] = 0;
+            regs[10] = 99;
+            regs[11] = 0;
+            sbi_call();
+            _exit((int32_t)regs[10] == -3 ? 42 : 43);
+        }
+        assert(waitpid(pid, &status, 0) == pid);
+        assert(WIFEXITED(status));
+        assert(WEXITSTATUS(status) == 42);
+
+        pid = fork();
+        assert(pid >= 0);
+        if (pid == 0) {
+            reset_irq();
+            regs[17] = SBI_EXT_SRST;
+            regs[16] = 0;
+            regs[10] = 1;
+            regs[11] = 0;
+            sbi_call();
+            _exit((int32_t)regs[10] == -2 ? 42 : 43);
+        }
+        assert(waitpid(pid, &status, 0) == pid);
+        assert(WIFEXITED(status));
+        assert(WEXITSTATUS(status) == 42);
+    }
 
     free(ram);
     return 0;
