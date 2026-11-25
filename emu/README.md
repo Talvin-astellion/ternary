@@ -275,7 +275,7 @@ fuzzing compares `pmp_check` and Sv32 translation (with and without PMP) against
 independent reference models; `make -C emu test-rv32` runs the fuzz cases.
 M-mode external/timer/software interrupts (causes 11/7/3) are supported;
 interrupts delegated by `mideleg` are masked at M-mode.  Supervisor interrupts
-honor direct/vectored `stvec`, prioritize external, timer, then software sources,
+honor direct/vectored `stvec`, prioritize external, software, then timer sources,
 and wake `wfi` only when an enabled interrupt is pending.  Use `--debug-mmu` to
 log translation failures.
 `--stats` prints retired instructions, Sv32 walks, TLB hits/misses, page faults,

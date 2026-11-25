@@ -112,8 +112,9 @@ int main(void)
     reset_irq();
     sie = SIE_STIE | SIE_SSIE;
     sip = SIP_STIP | SIP_SSIP;
-    expect_irq(5, VEC);
-    assert((sip & SIP_SSIP) != 0);
+    expect_irq(1, VEC);
+    assert((sip & SIP_SSIP) == 0);
+    assert((sip & SIP_STIP) != 0);
 
     reset_irq();
     sie = SIE_SSIE;
@@ -260,6 +261,15 @@ int main(void)
     assert(mcause == (CAUSE_M_EXTERNAL | 0x80000000u));
     assert((mip & MIP_MEIP) == 0);
     assert((mip & (MIP_MTIP | MIP_MSIP)) != 0);
+
+    reset_mtrap();
+    mideleg = 0;
+    csr_write(0x304, MIE_MSIE | MIE_MTIE);
+    mip = MIP_MSIP | MIP_MTIP;
+    assert(maybe_interrupt() == 1);
+    assert(mcause == (CAUSE_M_SOFTWARE | 0x80000000u));
+    assert(mip == MIP_MTIP);
+    assert((mip & MIP_MSIP) == 0);
 
     reset_mtrap();
     mideleg = 0;

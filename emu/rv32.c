@@ -1253,25 +1253,25 @@ static uint32_t irq_cause(uint32_t ip, uint32_t ie, uint32_t *pending)
         *pending = MIP_MEIP;
         return CAUSE_M_EXTERNAL;
     }
-    if ((ip & MIP_MTIP) && (ie & MIE_MTIE)) {
-        *pending = MIP_MTIP;
-        return CAUSE_M_TIMER;
-    }
     if ((ip & MIP_MSIP) && (ie & MIE_MSIE)) {
         *pending = MIP_MSIP;
         return CAUSE_M_SOFTWARE;
+    }
+    if ((ip & MIP_MTIP) && (ie & MIE_MTIE)) {
+        *pending = MIP_MTIP;
+        return CAUSE_M_TIMER;
     }
     if ((ip & SIP_SEIP) && (ie & SIE_SEIE)) {
         *pending = SIP_SEIP;
         return CAUSE_EXT_S;
     }
-    if ((ip & SIP_STIP) && (ie & SIE_STIE)) {
-        *pending = SIP_STIP;
-        return CAUSE_TIMER;
-    }
     if ((ip & SIP_SSIP) && (ie & SIE_SSIE)) {
         *pending = SIP_SSIP;
         return CAUSE_SOFTWARE;
+    }
+    if ((ip & SIP_STIP) && (ie & SIE_STIE)) {
+        *pending = SIP_STIP;
+        return CAUSE_TIMER;
     }
     return 0;
 }
