@@ -267,9 +267,9 @@ from `MSTATUS.MPP`, `medeleg`/`mideleg` route traps to S-mode, and the PMP CSRs
 restrict physical-memory and fetch permissions.  PMP is default-deny for S/U;
 boot installs a grant-all NAPOT entry that guests may override.  A minimal
 CLINT exposes `mtime`/`mtimecmp` at `0x0200bff8`/`0x02004000`; both CLINT
-writes and the SBI timer extension program the same timer deadline.  Timer
-interrupts are level-triggered and stay pending until `mtimecmp` is
-reprogrammed.
+writes and the SBI timer extension program the same timer deadline.  Wall-clock
+tick conversion avoids 64-bit overflow.  Timer interrupts are level-triggered
+and stay pending until `mtimecmp` is reprogrammed.
 Deterministic differential
 fuzzing compares `pmp_check` and Sv32 translation (with and without PMP) against
 independent reference models; `make -C emu test-rv32` runs the fuzz cases.

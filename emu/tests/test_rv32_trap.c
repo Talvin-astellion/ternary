@@ -410,6 +410,25 @@ int main(void)
         assert(WEXITSTATUS(status) == 42);
     }
 
+    {
+        struct timespec ts;
+        uint32_t hi;
+
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        reset_irq();
+        time_inst_mode = 0;
+        timebase = 1000000000u;
+        boot_ns = (uint64_t)ts.tv_sec * 1000000000ull +
+                  (uint64_t)ts.tv_nsec - 20000000000ull;
+        update_time();
+        assert(guest_time >= 19000000000ull);
+        assert(guest_time <= 21000000000ull);
+        assert(clint_load32(CLINT_MTIME + 4u, &hi));
+        assert(hi >= 4u);
+        time_inst_mode = 1;
+        timebase = 10000000u;
+    }
+
     free(ram);
     return 0;
 }

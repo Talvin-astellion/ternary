@@ -282,7 +282,9 @@ static void update_time(void)
     }
     clock_gettime(CLOCK_MONOTONIC, &ts);
     ns = (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
-    guest_time = (ns - boot_ns) * timebase / 1000000000ull;
+    ns -= boot_ns;
+    guest_time = (ns / 1000000000ull) * timebase +
+                 (ns % 1000000000ull) * timebase / 1000000000ull;
 }
 
 static void raise_timer_irq(void)
